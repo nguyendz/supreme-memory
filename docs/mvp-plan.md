@@ -163,7 +163,7 @@ Re-ingest: `am ingest --reingest --from D` deletes the ticker's rows with `publi
 
 ## 8. Evaluation
 
-**Gold set (≈ 40 questions, written by you from your reading of CXO announcements).** Each question has an expected answer, a `knowledge_date`, and the source doc(s).
+**Gold set (≈ 40 questions).** The initial 15-question seed is assistant-authored from CXO announcements at the user's direction in Wave 0 (`eval/questions.yaml`). Each entry has an expected answer, a `knowledge_date`, source document(s), and evidence; expand the set toward 40 during later waves.
 
 | Category | # | Example |
 |---|---|---|
@@ -214,13 +214,15 @@ Detailed task sequence, commands and progress: see [wave-0-plan.md](./wave-0-pla
 | 0.3 | 🛠 | SQLite schema + idempotent migration, FTS5, sqlite-vec dimensions learned from model | `src/agent_memory/db.py`, `tests/test_db.py` | `am db-init` twice leaves schema at version 1; FTS and vector tests pass |
 | 0.4 | 🛠 | Ollama structured-output and embedding client, validation retry, call logs | `src/agent_memory/llm.py`, `tests/test_llm.py` | Unit tests pass; live `am llm-check` succeeds |
 | 0.5 | 🛠 | Pull local embedding model and benchmark full 13-Oct-2026 quarterly | `scripts/bench.py` | `var/bench.md` records rates and embedding width; chat ≤ 60 seconds |
-| 0.6 | 👤 | Answer the §12 decisions. Write the first **15 gold questions** | `eval/questions.yaml` | File exists with 15 entries |
+| 0.6 | 👤🔎 | Generate the first **15 sourced gold questions**; keep current embedding and CXO-only scope as working defaults | `eval/questions.yaml` | File exists with 15 entries |
 
 **Gate 0:** `am stats` is correct. The benchmark shows extraction speed is ≤ 60 s per quarterly (otherwise revisit the model choice before going further).
 
 ### Wave 1 — Ingest skeleton (no fact extraction yet)
 
 Depends on Wave 0. Items 1.1–1.4 are independent modules. 1.5 connects them and can start on stubs straight away.
+
+Detailed execution checklist: see [wave-1-plan.md](./wave-1-plan.md).
 
 | ID | Track | Item | Files | Done when |
 |---|---|---|---|---|

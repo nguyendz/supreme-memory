@@ -14,7 +14,7 @@ At the end of Wave 0:
 
 **Gate 0:** `am stats` reports 1,316 announcements, the correct date range and markdown-source counts; `am llm-check` succeeds; and the quarterly benchmark completes in ≤ 60 seconds. If the benchmark is slower, pause before Wave 1 and tune model/context settings.
 
-**Technical gate result: PASS.** Inventory, unit tests, repeatable migrations, local chat, local embeddings and the full-quarterly benchmark all passed. Item 0.6 (gold questions) remains a user-review task but does not block the technical gate.
+**Technical gate result: PASS.** Inventory, unit tests, repeatable migrations, local chat, local embeddings and the full-quarterly benchmark all passed. The initial 15-question gold seed is now generated; user review can refine it later and does not block the technical gate.
 
 ## Decisions and assumptions for this wave
 
@@ -43,11 +43,11 @@ The local machine was checked before implementation: Ollama 0.40.13, Python 3.13
 **Files:** `pyproject.toml`, `uv.lock`, `.python-version`, `.gitignore`, `src/agent_memory/__init__.py`.
 
 **Acceptance**
-- `uv run am --help` displays the CLI.
-- `uv run pytest` works from the project root.
-- `uv sync --locked` can reproduce the environment.
+- [x] `uv run am --help` displays the CLI.
+- [ ] `uv run pytest` works from the project root.
+- [x] `uv sync --locked` can reproduce the environment.
 
-**Progress:** Implemented. Initial `uv sync` and package installation succeeded.
+**Progress:** Project scaffold is implemented; `uv sync --locked` and CLI help pass. All 6 tests pass with `uv run python -m pytest`, but `uv run pytest` currently fails on this Windows environment with `uv trampoline failed to canonicalize script path`.
 
 ### 0.2 — Announcement loader and inventory
 
@@ -57,19 +57,20 @@ The local machine was checked before implementation: Ollama 0.40.13, Python 3.13
 - Prefer `2.0.0/*_v2.md`; use `1.0.0/*.md` if v2 text is absent.
 - Read either metadata shape: nested `source_metadata` or top-level v1 fields.
 - Retain documents with missing markdown in the inventory, marked `text_source=missing`; do not silently drop them.
-- Reject malformed date folders and invalid JSON with a path-specific error.
+- [x] Reject malformed date folders with a path-specific error.
+- [ ] Reject invalid JSON with a path-specific error.
 - Report total docs, version counts, missing text/metadata and date range without calling the LLM.
 
 **Files:** `src/agent_memory/loader.py`, `src/agent_memory/config.py`, `src/agent_memory/cli.py`, `tests/test_loader.py`.
 
 **Acceptance**
-- `uv run am stats --ticker CXO` reports 1,316 docs.
-- Expected text counts from the archive: 168 v2, 1,146 v1, 2 missing.
-- Date range: 8 December 2010 through 22 October 2026 (UTC, based on folder timestamps).
-- Two folders have neither markdown nor metadata; keep them visible and report their IDs rather than omitting them.
-- Tests cover v2 preference, v1 fallback, missing markdown and malformed folder names.
+- [x] `uv run am stats --ticker CXO` reports 1,316 docs.
+- [x] Expected text counts from the archive: 168 v2, 1,146 v1, 2 missing.
+- [x] Date range: 8 December 2010 through 22 October 2026 (UTC, based on folder timestamps).
+- [x] Two folders have neither markdown nor metadata; keep them visible and report their IDs rather than omitting them.
+- [x] Tests cover v2 preference, v1 fallback, missing markdown and malformed folder names.
 
-**Progress:** Implemented and verified: 1,316 docs; 168 v2, 1,146 v1, 2 missing; 2 without metadata; 2010-12-08 through 2026-10-22. The two missing-text folders are `20220930-0058-Equity-Raising-Presentation-6A1112439` and `20260714-2222-Quarterly-Activities-and-Cashflow-Report-6A1333881`.
+**Progress:** Inventory counts, dates, source selection and listed missing folders are verified. Open: invalid metadata JSON raises `JSONDecodeError` without the metadata path in its message; add path context and a regression test. The two missing-text folders are `20220930-0058-Equity-Raising-Presentation-6A1112439` and `20260714-2222-Quarterly-Activities-and-Cashflow-Report-6A1333881`.
 
 ### 0.3 — SQLite schema and migration runner
 
@@ -83,12 +84,12 @@ The local machine was checked before implementation: Ollama 0.40.13, Python 3.13
 **Files:** `src/agent_memory/db.py`, `tests/test_db.py`.
 
 **Acceptance**
-- `uv run am db-init` creates `var/memory.db`.
-- Running it twice applies schema version 1 once.
-- A test inserts a chunk and finds it through FTS5.
-- A test creates vec0 tables with a test width and rejects a different width.
+- [x] `uv run am db-init` creates `var/memory.db`.
+- [x] Running it twice applies schema version 1 once.
+- [x] A test inserts a chunk and finds it through FTS5.
+- [x] A test creates vec0 tables with a test width and rejects a different width.
 
-**Progress:** Implemented; automated tests pass for the local sqlite-vec extension and Windows build.
+**Progress:** Implemented and verified; automated tests pass for FTS5, migration idempotence, sqlite-vec and width mismatch. `db-init` also succeeded twice against an isolated temporary database.
 
 ### 0.4 — Local Ollama wrapper
 
@@ -102,10 +103,10 @@ The local machine was checked before implementation: Ollama 0.40.13, Python 3.13
 **Files:** `src/agent_memory/llm.py`, `src/agent_memory/config.py`, `src/agent_memory/db.py`, `src/agent_memory/cli.py`, `tests/test_llm.py`.
 
 **Acceptance**
-- Mocked tests prove schema use, retry behavior, embedding dimensions and persisted call logs.
-- `uv run am llm-check` succeeds against Ollama and initializes vector tables at the returned embedding width.
+- [x] Mocked tests prove schema use, retry behavior, embedding dimensions and persisted call logs.
+- [x] `uv run am llm-check` succeeds against Ollama and initializes vector tables at the returned embedding width.
 
-**Progress:** Implemented and live-verified: `qwen3.5:9b` returned valid structured JSON; `qwen3-embedding` returned a vector; the database initialized vector tables at the returned width.
+**Progress:** Implemented and live-verified: `qwen3.5:9b` returned valid structured JSON; `qwen3-embedding` returned a 4,096-dimensional vector; the database initialized vector tables at the returned width. The live check passed again during this review using an isolated temporary database.
 
 ### 0.5 — Model pull and benchmark
 
@@ -127,36 +128,33 @@ uv run python scripts/bench.py
 ```
 
 **Acceptance**
-- Both model requests succeed from the local Ollama server.
-- Embedding width is recorded and the database vector tables match it.
-- Quarterly chat call completes in ≤ 60 seconds. Update the throughput estimate in the MVP plan from the measured numbers.
+- [x] Both model requests succeed from the local Ollama server.
+- [x] Embedding width is recorded and the database vector tables match it.
+- [x] Quarterly chat call completes in ≤ 60 seconds. Update the throughput estimate in the MVP plan from the measured numbers.
 
 **Progress:** Complete. The quarterly report (35,594 characters; 9,274 prompt tokens) took 6.05 seconds end to end. Prompt evaluation was 29,837 tokens/s; generation was 113.9 tokens/s for 418 output tokens. Three embeddings took 0.10 seconds and returned 4,096 dimensions. Full details are in ignored `var/bench.md`.
 
 The generated summary is a **latency sample only**, not a checked answer. It is not added to announcement memory; fact accuracy is tested in later waves.
 
-### 0.6 — Gold questions and final decisions
+### 0.6 — Initial gold questions and working defaults
 
-**User contribution**
-- Choose whether to review 15 draft questions or provide your own. The first implementation does not invent evaluation answers because those become the accuracy baseline.
-- Confirm the embedding choice after seeing the local smoke test; keep `qwen3-embedding` unless there is a measured reason to switch.
-- Confirm whether CXO-only is sufficient for the MVP. No second-ticker data is currently present in the workspace.
+The user asked the assistant to generate the initial 15 questions from the source announcements. The existing `qwen3-embedding` model and CXO-only archive remain the working defaults for this seed set; neither default is a permanent scope decision.
 
 **Acceptance**
-- 15 questions have a question, expected answer, `knowledge_date` and source document(s) before Wave 2 evaluation begins.
+- [x] 15 questions have a question, expected answer, `knowledge_date` and source document(s) before Wave 2 evaluation begins.
 
-**Progress:** Pending user review; not a blocker for the technical Wave 0 gate.
+**Progress:** Complete. The assistant-authored seed set is in [`eval/questions.yaml`](../eval/questions.yaml); entries include source excerpts to ground the expected answers. User review can revise the seed set later.
 
 ## Execution order
 
-1. `uv sync --locked` and `uv run am --help`.
-2. `uv run am stats --ticker CXO`; compare inventory counts and dates to 0.2 acceptance.
-3. `uv run pytest`; fix any Windows-specific database/extension issues.
-4. `uv run am db-init`; run a second time and confirm no duplicate migration.
-5. `ollama pull qwen3-embedding`.
-6. `uv run am llm-check`; inspect the model call log and vector width.
-7. `uv run python scripts/bench.py`; record timing in `var/bench.md`.
-8. Run `uv run pytest` again and close the gate.
+1. [x] `uv sync --locked` and `uv run am --help`.
+2. [x] `uv run am stats --ticker CXO`; compare inventory counts and dates to 0.2 acceptance.
+3. [ ] `uv run pytest`; fix any Windows-specific database/extension issues. (`uv run python -m pytest` passes all 6 tests; see 0.1.)
+4. [x] `uv run am db-init`; run a second time and confirm no duplicate migration.
+5. [x] `ollama pull qwen3-embedding`.
+6. [x] `uv run am llm-check`; inspect the model call log and vector width.
+7. [x] `uv run python scripts/bench.py`; record timing in `var/bench.md`.
+8. [ ] Run `uv run pytest` again and close the gate. (`uv run python -m pytest` passes all 6 tests; see 0.1.)
 
 ## Risks to resolve before Wave 1
 

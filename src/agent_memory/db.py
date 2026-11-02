@@ -12,7 +12,7 @@ from typing import Iterator
 import sqlite_vec
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 _SCHEMA_SQL = """
 CREATE TABLE document (
@@ -186,6 +186,28 @@ CREATE TABLE vector_metadata (
 INSERT INTO chunk_fts (chunk_fts) VALUES ('rebuild');
 """
 
+_MIGRATION_2_SQL = """
+CREATE TABLE paragraph_hash_observation (
+    scope TEXT NOT NULL CHECK (scope IN ('ticker', 'global')),
+    ticker TEXT NOT NULL DEFAULT '',
+    simhash TEXT NOT NULL,
+    doc_id TEXT NOT NULL REFERENCES document(id) ON DELETE CASCADE,
+    published_at TEXT NOT NULL,
+    sample_text TEXT NOT NULL,
+    PRIMARY KEY (scope, ticker, simhash, doc_id)
+);
+
+CREATE INDEX paragraph_hash_observation_lookup_idx
+    ON paragraph_hash_observation (scope, ticker, simhash, published_at);
+
+CREATE INDEX paragraph_hash_observation_doc_idx
+    ON paragraph_hash_observation (doc_id);
+"""
+
+_MIGRATION_3_SQL = """
+ALTER TABLE document ADD COLUMN form_type TEXT;
+"""
+
 
 def connect_database(path: Path) -> sqlite3.Connection:
     """Open a configured SQLite connection."""
@@ -236,22 +258,48 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
             f"Database schema {max(applied_versions)} is newer than supported "
             f"schema {SCHEMA_VERSION}"
         )
-    if SCHEMA_VERSION in applied_versions:
-        return
-
-    applied_at = datetime.now(timezone.utc).isoformat()
-    script = (
-        "BEGIN IMMEDIATE;\n"
-        + _SCHEMA_SQL
-        + f"\nINSERT INTO schema_migrations(version, applied_at) "
-        f"VALUES ({SCHEMA_VERSION}, '{applied_at}');\nCOMMIT;"
+    migrations = (
+        (1, _SCHEMA_SQL),
+        (2, _MIGRATION_2_SQL),
+        (3, _MIGRATION_3_SQL),
     )
-    try:
-        connection.executescript(script)
-    except sqlite3.Error:
-        if connection.in_transaction:
-            connection.rollback()
-        raise
+    for version, migration_sql in migrations:
+        if version in applied_versions:
+            continue
+        applied_at = datetime.now(timezone.utc).isoformat()
+        script = (
+            "BEGIN IMMEDIATE;\n"
+            + migration_sql
+            + f"\nINSERT INTO schema_migrations(version, applied_at) "
+            f"VALUES ({version}, '{applied_at}');\nCOMMIT;"
+        )
+        try:
+            connection.executescript(script)
+        except sqlite3.Error:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+
+
+def rebuild_paragraph_hash_aggregates(connection: sqlite3.Connection) -> None:
+    """Rebuild the current hash summary from its per-document observations."""
+    connection.execute("DELETE FROM paragraph_hash")
+    connection.execute(
+        """
+        INSERT INTO paragraph_hash (
+            scope, ticker, simhash, first_seen_at, doc_count, sample_text
+        )
+        SELECT
+            scope,
+            ticker,
+            simhash,
+            MIN(published_at),
+            COUNT(DISTINCT doc_id),
+            MIN(sample_text)
+        FROM paragraph_hash_observation
+        GROUP BY scope, ticker, simhash
+        """
+    )
 
 
 def ensure_vector_tables(connection: sqlite3.Connection, dimensions: int) -> None:

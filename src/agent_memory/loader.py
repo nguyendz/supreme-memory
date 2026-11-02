@@ -77,7 +77,10 @@ def _read_metadata(path: Path | None) -> dict[str, object]:
     if path is None:
         return {}
     with path.open("r", encoding="utf-8-sig") as metadata_file:
-        value = json.load(metadata_file)
+        try:
+            value = json.load(metadata_file)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid announcement metadata JSON: {path}: {exc}") from exc
     if not isinstance(value, dict):
         raise ValueError(f"Announcement metadata must be a JSON object: {path}")
     return value

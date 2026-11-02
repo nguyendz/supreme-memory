@@ -91,3 +91,15 @@ def test_loader_rejects_malformed_announcement_folder(tmp_path):
 
     with pytest.raises(ValueError, match="YYYYMMDD-HHMM"):
         discover_announcements(tmp_path)
+
+
+def test_loader_reports_invalid_metadata_json_path(tmp_path):
+    folder = tmp_path / "CXO" / "announcements" / "20261013-2139-Test-Announcement-1"
+    metadata_path = folder / "1.0.0" / f"{folder.name}.json"
+    metadata_path.parent.mkdir(parents=True)
+    metadata_path.write_text("{", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Invalid announcement metadata JSON") as error:
+        discover_announcements(tmp_path)
+
+    assert str(metadata_path) in str(error.value)

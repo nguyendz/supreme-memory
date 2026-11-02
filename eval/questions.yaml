@@ -1,0 +1,350 @@
+# knowledge_date is an inclusive UTC date; source IDs are archive folder IDs.
+version: 1
+ticker: CXO
+questions:
+  - id: w0-01
+    category: current_state
+    knowledge_date: "2026-10-15"
+    question: "What was CXO's cash balance at 30 September 2026?"
+    expected_answer: "A$200 million."
+    sources:
+      - document_id: 20261013-2139-Quarterly-Activities-and-Cashflow-Report-6A1349068
+        evidence: >-
+          Cash balance of A$200 million at 30 September 2026
+          (30 June 2026: A$182 million).
+      - document_id: 20261013-2142-September-Quarterly-Report-Presentation-6A1349070
+        evidence: "Strong financial position with $200 million of cash at 30 September 2026."
+
+  - id: w0-02
+    category: event_lookup
+    knowledge_date: "2026-09-09"
+    question: "By 8 September 2026, what restart milestone had Finniss achieved, and when was the first new concentrate shipment targeted?"
+    expected_answer: >-
+      The recommissioned processing plant had produced its first spodumene
+      concentrate. The first shipment of newly produced concentrate was
+      targeted for the December quarter of 2026.
+    sources:
+      - document_id: 20260907-2238-First-Spodumene-Concentrate-Produced-at-Finniss-6A1342692
+        evidence: >-
+          First spodumene concentrate produced at the Finniss processing plant;
+          first shipment of newly produced spodumene concentrate targeted for
+          the December Quarter 2026.
+
+  - id: w0-03
+    category: current_state
+    knowledge_date: "2026-10-15"
+    question: "What throughput capacity was expected after the Finniss brownfields plant upgrades?"
+    expected_answer: "Approximately 20% higher, reaching 1.2 million tonnes per annum."
+    sources:
+      - document_id: 20261013-2139-Quarterly-Activities-and-Cashflow-Report-6A1349068
+        evidence: >-
+          The upgrades are expected to increase plant throughput capacity by
+          approximately 20% to 1.2 million tonnes per annum.
+
+  - id: w0-04
+    category: point_in_time
+    knowledge_date: "2026-10-15"
+    question: "As of the September 2026 quarterly report, when was BP33 first development ore expected?"
+    expected_answer: "Mid-CY27."
+    sources:
+      - document_id: 20261013-2139-Quarterly-Activities-and-Cashflow-Report-6A1349068
+        evidence: "BP33 development supported the planned delivery of first development ore in mid-CY27."
+      - document_id: 20261013-2142-September-Quarterly-Report-Presentation-6A1349070
+        evidence: "First BP33 development ore: mid-CY27."
+
+  - id: w0-05
+    category: event_lookup
+    knowledge_date: "2026-10-15"
+    question: "What high-grade BP33 intercept was reported in the September 2026 quarterly report?"
+    expected_answer: "34.08 metres at 2.09% Li2O from 578.7 metres in hole NMRD100."
+    sources:
+      - document_id: 20261013-2139-Quarterly-Activities-and-Cashflow-Report-6A1349068
+        evidence: >-
+          Extensional drilling at BP33 returned 34.08 m at 2.09% Li2O from
+          578.7 m in NMRD100.
+
+  - id: w0-06
+    category: current_state
+    knowledge_date: "2026-10-15"
+    question: "How much Tranche 2 convertible-note funding had Core received, and through when was Finniss fully funded?"
+    expected_answer: >-
+      Core received US$44 million (approximately A$62 million); Finniss was
+      fully funded through to steady-state production in 2028.
+    sources:
+      - document_id: 20261013-2139-Quarterly-Activities-and-Cashflow-Report-6A1349068
+        evidence: >-
+          Receipt of Tranche 2 Convertible Note funds of US$44 million
+          (~A$62 million), completing the funding package for Finniss, which
+          is fully funded through to steady-state production in 2028.
+
+  - id: w0-07
+    category: event_lookup
+    knowledge_date: "2026-09-05"
+    question: "Who agreed to buy the remaining Finniss lithium-fines stockpile, how much material was involved, and what was the base price?"
+    expected_answer: >-
+      Glencore International AG agreed to buy approximately 25,000 tonnes at a
+      base price of approximately US$285 per tonne (about A$400/t) CIF, subject
+      to customary adjustments.
+    sources:
+      - document_id: 20260903-2316-Sale-of-Remaining-Lithium-Fines-Stockpile-6A1342177
+        evidence: >-
+          Agreement with Glencore International AG for sale of the remaining
+          ~25kt of lithium DSO fines; base price of ~US$285/t (~A$400/t) CIF,
+          subject to customary adjustments.
+
+  - id: w0-08
+    category: summary
+    knowledge_date: "2026-10-15"
+    question: "Summarize the main operating, development, and funding outcomes in CXO's September 2026 quarter."
+    expected_answer: >-
+      Finniss produced first spodumene concentrate after plant upgrades expected
+      to lift throughput by about 20% to 1.2 Mtpa, with first shipment targeted
+      for the December quarter. BP33 development remained on track for first
+      development ore in mid-CY27 and drilling returned a 34.08 m at 2.09% Li2O
+      intercept. Sales of the remaining lithium-fines stockpile brought 2026
+      stockpile-sale revenue to about A$38.5 million. Receipt of US$44 million
+      in Tranche 2 funding completed the package through to steady-state
+      production in 2028, and quarter-end cash was A$200 million.
+    sources:
+      - document_id: 20261013-2139-Quarterly-Activities-and-Cashflow-Report-6A1349068
+        evidence: >-
+          September-quarter highlights report first concentrate, upgraded
+          throughput, BP33 development and drilling, the final fines sale,
+          completed funding through steady-state production in 2028, and
+          A$200 million cash at 30 September 2026.
+
+  - id: w0-09
+    category: history_change
+    knowledge_date: "2023-02-28"
+    question: "What production and commissioning milestone did Core announce at Finniss in February 2023?"
+    expected_answer: >-
+      The DMS plant had produced its first volumes of high-quality spodumene
+      concentrate; construction of the plant was complete and commissioning
+      was well advanced.
+    sources:
+      - document_id: 20230226-2225-First-Spodumene-Concentrate-Produced-2A1433464
+        evidence: >-
+          The Finniss DMS plant had produced first volumes of high-quality
+          spodumene concentrate; construction was complete and commissioning
+          was well advanced.
+
+  - id: w0-10
+    category: negative_future_leak
+    knowledge_date: "2025-06-30"
+    question: "As of 30 June 2025, had Core's Board approved the Finniss restart Final Investment Decision?"
+    expected_answer: >-
+      No. The May 2025 Restart Study said no restart decision had been made
+      and that FID remained subject to Board approval, market conditions, and
+      securing a suitable funding pathway.
+    sources:
+      - document_id: 20250513-2303-Restart-Study-Repositions-Finniss-Operations-2A1596413
+        evidence: >-
+          No restart decision has been made; a Final Investment Decision
+          remains subject to Board approval, contingent on market conditions
+          and securing a suitable funding pathway.
+
+  - id: w0-11
+    category: point_in_time
+    knowledge_date: "2025-05-15"
+    question: "What mine life did the May 2025 Finniss Restart Study model, and what share of the first ten years was backed by Ore Reserves?"
+    expected_answer: >-
+      The study modelled a potential 20-year mine life, with 94% of the first
+      ten years backed by Ore Reserves.
+    sources:
+      - document_id: 20250513-2303-Restart-Study-Repositions-Finniss-Operations-2A1596413
+        evidence: >-
+          The Restart Study confirms the potential for an attractive 20-year
+          mine life; 94% of the first 10 years is backed by Ore Reserves.
+
+  - id: w0-12
+    category: point_in_time
+    knowledge_date: "2025-05-15"
+    question: "What annual concentrate production did the May 2025 Finniss Restart Study project?"
+    expected_answer: "Approximately 205 ktpa of SC6-equivalent concentrate, a 7% increase."
+    sources:
+      - document_id: 20250513-2303-Restart-Study-Repositions-Finniss-Operations-2A1596413
+        evidence: "Concentrate production lifted 7% to approximately 205 ktpa SC6 equivalent."
+
+  - id: w0-13
+    category: history_change
+    knowledge_date: "2026-09-09"
+    question: "Did Finniss achieve the first-concentrate timing target announced with the March 2026 FID?"
+    expected_answer: >-
+      Yes. The FID announcement targeted first concentrate production in the
+      September quarter of 2026, and the first concentrate was produced on
+      8 September 2026, within six months of FID.
+    sources:
+      - document_id: 20260317-2305-FID-Approved-and-Funding-Secured-for-Finniss-Restart-2A1661043
+        evidence: "First spodumene concentrate production was targeted for the September quarter 2026."
+      - document_id: 20260907-2238-First-Spodumene-Concentrate-Produced-at-Finniss-6A1342692
+        evidence: >-
+          First spodumene concentrate was produced on 8 September 2026, on
+          schedule and within six months of FID.
+
+  - id: w0-14
+    category: trivial
+    knowledge_date: "2025-10-16"
+    question: "When and where was Core's 2025 AGM scheduled to be held?"
+    expected_answer: >-
+      Friday 14 November 2025 at 9:00am AWST (Perth time), at Grant Thornton
+      Australia Limited, Level 43, Central Park, 152-158 St Georges Terrace,
+      Perth, Western Australia.
+    sources:
+      - document_id: 20251014-2143-Notice-of-2025-AGM-and-Proxy-Form-2A1629281
+        evidence: >-
+          The AGM was to be held on Friday, 14 November 2025 at 9:00am AWST at
+          the offices of Grant Thornton Australia Limited, Level 43, Central
+          Park, 152-158 St Georges Terrace, Perth, Western Australia.
+
+  - id: w0-15
+    category: event_lookup
+    knowledge_date: "2026-09-05"
+    question: "How much incremental revenue had Core reported from total lithium stockpile sales in calendar 2026?"
+    expected_answer: "Approximately A$38.5 million."
+    sources:
+      - document_id: 20260903-2316-Sale-of-Remaining-Lithium-Fines-Stockpile-6A1342177
+        evidence: >-
+          The sale completed monetisation of all existing stockpiles,
+          generating incremental revenue from total lithium sales in 2026 of
+          approximately A$38.5 million.
+
+  - id: w1-16
+    category: event_lookup
+    knowledge_date: "2026-05-01"
+    question: "In the April 2026 fines sale, who bought how much material, at what base price, and through which port was it to be shipped?"
+    expected_answer: >-
+      Glencore International AG agreed to buy approximately 20,000 tonnes at a
+      base price of US$290/t (about A$405/t) CIF. The sale was to be shipped
+      through Darwin Port, with shipment scheduled for May 2026.
+    sources:
+      - document_id: 20260429-2321-Sale-of-20,000-Tonnes-of-Lithium-Fines-6A1323092
+        evidence: >-
+          Agreement with Glencore International AG for sale of ~20kt at
+          US$290/t (~A$405/t) CIF; the shipment was scheduled for May 2026
+          through Darwin Port.
+
+  - id: w1-17
+    category: history_change
+    knowledge_date: "2026-06-11"
+    question: "What was the size and base price of the June 2026 second fines sale, and what total lithium-sales revenue had Core reported for 2026 by then?"
+    expected_answer: >-
+      The second sale was for 25,000 tonnes at a base price of approximately
+      US$270/t (A$375/t) CIF. Total revenue from 2026 lithium sales was then
+      approximately A$28.5 million.
+    sources:
+      - document_id: 20260609-2225-Second-Sale-of-Lithium-Fines-6A1328851
+        evidence: >-
+          Sale of 25,000 tonnes at ~US$270/t (~A$375/t) CIF; total revenue
+          from 2026 lithium sales was ~A$28.5 million.
+
+  - id: w1-18
+    category: event_lookup
+    knowledge_date: "2026-05-15"
+    question: "Which company received the BP33 underground mining contract, and what were its value and term?"
+    expected_answer: >-
+      Develop Global Ltd received the $274 million contract for a three-year
+      term, with an option for a two-year extension.
+    sources:
+      - document_id: 20260512-2252-Core-Awards-BP33-Underground-Mining-Contract-at-Finniss-6A1325258
+        evidence: >-
+          Core awarded a $274 million underground mining contract to Develop
+          Global Ltd for a term of three years, plus an option for a two-year
+          extension.
+
+  - id: w1-19
+    category: current_state
+    knowledge_date: "2026-03-19"
+    question: "What financing sources made up the Finniss restart package announced with the March 2026 FID?"
+    expected_answer: >-
+      A US$70 million convertible note from Glencore and InfraVia, a US$50
+      million senior secured debt facility from Nebari, and an intended
+      A$120 million equity raise before costs.
+    sources:
+      - document_id: 20260317-2305-FID-Approved-and-Funding-Secured-for-Finniss-Restart-2A1661043
+        evidence: >-
+          The Funding Package comprised a US$70 million Convertible Note from
+          Glencore and InfraVia, a US$50 million senior secured debt facility
+          from Nebari, and an intended A$120 million equity raising.
+
+  - id: w1-20
+    category: point_in_time
+    knowledge_date: "2026-03-19"
+    question: "At the March 2026 FID, which quarter was targeted for first spodumene concentrate production?"
+    expected_answer: "The September quarter of 2026."
+    sources:
+      - document_id: 20260317-2305-FID-Approved-and-Funding-Secured-for-Finniss-Restart-2A1661043
+        evidence: >-
+          The staged restart program targeted first spodumene concentrate
+          production for the September quarter 2026.
+
+  - id: w1-21
+    category: negative_future_leak
+    knowledge_date: "2026-03-19"
+    question: "As of 19 March 2026, had Finniss produced first spodumene concentrate under the approved restart?"
+    expected_answer: >-
+      No. The FID announcement described early works and site preparation as
+      commencing immediately and targeted first concentrate production for the
+      September quarter of 2026.
+    sources:
+      - document_id: 20260317-2305-FID-Approved-and-Funding-Secured-for-Finniss-Restart-2A1661043
+        evidence: >-
+          Early works and site preparation were to commence immediately; first
+          spodumene concentrate production was targeted for the September
+          quarter 2026.
+
+  - id: w1-22
+    category: point_in_time
+    knowledge_date: "2026-10-15"
+    question: "As of the September 2026 quarterly report, when was delivery of the reflux classifier expected?"
+    expected_answer: "The March quarter of CY27; completion of the final brownfields upgrade was expected in FY27."
+    sources:
+      - document_id: 20261013-2139-Quarterly-Activities-and-Cashflow-Report-6A1349068
+        evidence: >-
+          The reflux classifier was the final brownfields upgrade, expected to
+          be completed in FY27, with delivery scheduled for the March quarter
+          of CY27.
+
+  - id: w1-23
+    category: negative_future_leak
+    knowledge_date: "2026-10-15"
+    question: "As of the September 2026 quarterly report, had the reflux classifier been installed at Finniss?"
+    expected_answer: >-
+      No. It was still the final brownfields upgrade, with delivery scheduled
+      for the March quarter of CY27 and completion expected in FY27.
+    sources:
+      - document_id: 20261013-2139-Quarterly-Activities-and-Cashflow-Report-6A1349068
+        evidence: >-
+          The reflux classifier was the final brownfields upgrade, expected to
+          be completed in FY27, with delivery scheduled for the March quarter
+          of CY27.
+
+  - id: w1-24
+    category: trivial
+    knowledge_date: "2026-10-24"
+    question: "When and where was Core's 2026 AGM scheduled to be held?"
+    expected_answer: >-
+      Wednesday 25 November 2026 at 9:00am AWST, at Grant Thornton Australia
+      Limited, Level 43, Central Park, 152-158 St Georges Terrace, Perth WA.
+    sources:
+      - document_id: 20261022-2155-Notice-of-2026-AGM-and-Proxy-Form-6A1350840
+        evidence: >-
+          The AGM was to be held at Grant Thornton Australia Limited, Level
+          43, Central Park, 152-158 St Georges Terrace, Perth WA on Wednesday,
+          25 November 2026 at 9:00am AWST.
+
+  - id: w1-25
+    category: event_lookup
+    knowledge_date: "2026-05-21"
+    question: "What May 2026 milestone marked the recommencement of mining at Finniss, and what did the Grants pit design expect to deliver?"
+    expected_answer: >-
+      The first blast and excavation at the Grants open pit marked mining's
+      recommencement at Finniss. The optimized pit design provided access to
+      approximately 784 kt of ore and was expected to deliver approximately
+      134 kt of SC5 product.
+    sources:
+      - document_id: 20260519-2253-Core-Commences-Mining-Operations-at-Finniss-6A1326209
+        evidence: >-
+          First blast and excavation activities were initiated at the Grants
+          open pit, marking recommencement of mining at Finniss. The optimised
+          pit design provided access to approximately 784 kt of ore and was
+          expected to deliver approximately 134 kt of SC5 product.
