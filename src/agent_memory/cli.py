@@ -10,11 +10,15 @@ import typer
 from pydantic import BaseModel
 from rich.console import Console
 
-from agent_memory.config import AppConfig, load_config
-from agent_memory.db import initialize_database
+from agent_memory.config import AppConfig, load_config, validate_wave2_local_runtime
+from agent_memory.db import database_connection, initialize_database
+from agent_memory.evaluation import run_evaluation
 from agent_memory.llm import LLMClient
 from agent_memory.loader import discover_announcements
+from agent_memory.pipeline.extract import run_extraction
 from agent_memory.pipeline.ingest import run_ingest
+from agent_memory.pipeline.review import export_t1_review
+from agent_memory.query.baseline_rag import answer_baseline, build_baseline_index
 
 
 app = typer.Typer(no_args_is_help=True, help="Local company-announcement memory.")
@@ -32,6 +36,22 @@ def _parse_cli_date(value: str | None, option_name: str) -> date | None:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise typer.BadParameter(f"{option_name} must use YYYY-MM-DD") from exc
+
+
+def _validate_wave2_runtime(
+    settings: AppConfig,
+    *,
+    require_chat_model: bool = True,
+    require_embedding_model: bool = True,
+) -> None:
+    try:
+        validate_wave2_local_runtime(
+            settings,
+            require_chat_model=require_chat_model,
+            require_embedding_model=require_embedding_model,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command()
@@ -165,6 +185,222 @@ def ingest(
         )
     for doc_id, error in summary.errors:
         console.print(f"[red]Failed {doc_id}: {error}[/red]")
+    if summary.failed:
+        raise typer.Exit(code=1)
+
+
+def _baseline_ticker(database_path: Path, requested: str | None) -> str:
+    if requested is not None:
+        normalized = requested.strip().upper()
+        if not normalized:
+            raise typer.BadParameter("--ticker must not be blank")
+        return normalized
+    with database_connection(database_path) as connection:
+        tickers = [
+            row["ticker"]
+            for row in connection.execute(
+                "SELECT DISTINCT ticker FROM document ORDER BY ticker"
+            ).fetchall()
+        ]
+    if len(tickers) != 1:
+        raise typer.BadParameter(
+            "Specify --ticker when the baseline corpus contains multiple tickers"
+        )
+    return tickers[0]
+
+
+@app.command()
+def extract(
+    database: Path = typer.Option(
+        ...,
+        "--database",
+        exists=True,
+        dir_okay=False,
+        help="Isolated source database to extract from; no canonical facts are written.",
+    ),
+    ticker: str | None = typer.Option(None, help="Limit extraction to this ticker."),
+    from_date: str | None = typer.Option(
+        None, "--from", help="Inclusive publication date."
+    ),
+    to_date: str | None = typer.Option(
+        None, "--to", help="Inclusive publication date."
+    ),
+    limit: int | None = typer.Option(None, min=1, help="Limit sorted documents."),
+    force: bool = typer.Option(
+        False, "--force", help="Re-run extraction despite a matching cache entry."
+    ),
+    confirm_wave1_gate: bool = typer.Option(
+        False,
+        "--confirm-wave1-gate",
+        help="Confirm triage, boilerplate, and cross-reference reviews are complete.",
+    ),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml."),
+) -> None:
+    """Extract quote-checked candidate facts into the isolated extraction cache."""
+    if not confirm_wave1_gate:
+        raise typer.BadParameter(
+            "Do not run extraction until the Wave 1 Gate 1 manual reviews are accepted"
+        )
+    settings = _load_settings(config)
+    _validate_wave2_runtime(settings, require_embedding_model=False)
+    client = LLMClient(settings, database)
+    eval_directory = settings.project_root / "var" / "eval"
+    summary = run_extraction(
+        database,
+        client,
+        ticker=ticker,
+        start_date=_parse_cli_date(from_date, "--from"),
+        end_date=_parse_cli_date(to_date, "--to"),
+        limit=limit,
+        force=force,
+        rejection_path=eval_directory / "quote-rejections.csv",
+        unsupported_path=eval_directory / "unsupported_forms.csv",
+    )
+    console.print(
+        f"Discovered: {summary.discovered}; selected: {summary.selected}; "
+        f"extracted: {summary.extracted}; cache hits: {summary.cache_hits}; "
+        f"unsupported: {summary.unsupported}; failed: {summary.failed}; "
+        f"recovery-capped facts: {summary.truncated_facts}"
+    )
+    console.print(
+        f"Prompt tokens: {summary.prompt_tokens}; output tokens: "
+        f"{summary.output_tokens}; attempts: {summary.attempts}; "
+        f"elapsed: {summary.elapsed_seconds:.2f}s"
+    )
+    for doc_id, error in summary.errors:
+        console.print(f"[red]Failed {doc_id}: {error}[/red]")
+    if summary.failed:
+        raise typer.Exit(code=1)
+
+
+@app.command("t1-review")
+def t1_review(
+    database: Path = typer.Option(
+        ...,
+        "--database",
+        exists=True,
+        dir_okay=False,
+        help="Isolated source database containing extraction cache results.",
+    ),
+    output: Path | None = typer.Option(
+        None, "--output", help="CSV output path for the review file."
+    ),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml."),
+) -> None:
+    """Export quote-verified T1 candidates from the five fixed quarterlies."""
+    settings = _load_settings(config)
+    output_path = output or settings.project_root / "var" / "eval" / "t1-review.csv"
+    summary = export_t1_review(database, settings.ollama_model, output_path)
+    console.print(
+        f"Quarterlies: {summary.cached_documents}/{summary.documents} cached; "
+        f"T1 candidates: {summary.candidates}; review file: {output_path}"
+    )
+    for doc_id in summary.stale_or_missing:
+        console.print(f"[yellow]No current extraction cache: {doc_id}[/yellow]")
+
+
+@app.command("baseline-index")
+def baseline_index(
+    source_database: Path = typer.Option(
+        ...,
+        "--source-db",
+        exists=True,
+        dir_okay=False,
+        help="Source corpus database to clone; the source remains unchanged.",
+    ),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml."),
+) -> None:
+    """Build the isolated all-chunk vector index used by baseline RAG."""
+    settings = _load_settings(config)
+    _validate_wave2_runtime(settings, require_chat_model=False)
+    baseline_path = settings.project_root / "var" / "eval" / "baseline.db"
+    client = LLMClient(settings, baseline_path)
+    stats = build_baseline_index(source_database, baseline_path, client)
+    console.print(
+        f"Baseline index ready: {baseline_path}; chunks: "
+        f"{stats.embedded_chunks}/{stats.source_chunks}; "
+        f"dimensions: {stats.dimensions or 'none'}"
+    )
+
+
+@app.command()
+def ask(
+    question: str,
+    baseline: bool = typer.Option(
+        False, "--baseline", help="Use the naive chunk-RAG baseline."
+    ),
+    as_of: str | None = typer.Option(
+        None, "--as-of", help="Inclusive knowledge date (YYYY-MM-DD)."
+    ),
+    ticker: str | None = typer.Option(None, help="Restrict retrieval to this ticker."),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml."),
+) -> None:
+    """Answer from a baseline corpus with validated source citations."""
+    if not baseline:
+        raise typer.BadParameter("Currently supported mode requires --baseline")
+    knowledge_date = _parse_cli_date(as_of, "--as-of")
+    if knowledge_date is None:
+        raise typer.BadParameter("--as-of is required with --baseline")
+    settings = _load_settings(config)
+    baseline_path = settings.project_root / "var" / "eval" / "baseline.db"
+    if not baseline_path.is_file():
+        raise typer.BadParameter(
+            f"Baseline database not found; run am baseline-index first: {baseline_path}"
+        )
+    _validate_wave2_runtime(settings)
+    selected_ticker = _baseline_ticker(baseline_path, ticker)
+    client = LLMClient(settings, baseline_path)
+    answer = answer_baseline(
+        baseline_path,
+        client,
+        question,
+        knowledge_date=knowledge_date,
+        ticker=selected_ticker,
+    )
+    console.print(answer.answer)
+    for citation in answer.citations:
+        console.print(f"[dim]{citation.document_id}: {citation.quote}[/dim]")
+
+
+@app.command("eval")
+def evaluate(
+    baseline: bool = typer.Option(
+        False, "--baseline", help="Evaluate the naive chunk-RAG baseline."
+    ),
+    questions: Path | None = typer.Option(
+        None, "--questions", exists=True, dir_okay=False, help="Gold YAML file."
+    ),
+    report: Path | None = typer.Option(
+        None, "--report", help="Markdown report output path."
+    ),
+    ticker: str | None = typer.Option(None, help="Override the gold-set ticker."),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml."),
+) -> None:
+    """Evaluate baseline answers against the sourced gold question set."""
+    if not baseline:
+        raise typer.BadParameter("Currently supported evaluation requires --baseline")
+    settings = _load_settings(config)
+    baseline_path = settings.project_root / "var" / "eval" / "baseline.db"
+    if not baseline_path.is_file():
+        raise typer.BadParameter(
+            f"Baseline database not found; run am baseline-index first: {baseline_path}"
+        )
+    _validate_wave2_runtime(settings)
+    question_path = questions or settings.project_root / "eval" / "questions.yaml"
+    report_path = report or settings.project_root / "var" / "eval" / "baseline.md"
+    client = LLMClient(settings, baseline_path)
+    summary = run_evaluation(
+        baseline_path,
+        client,
+        question_path,
+        report_path,
+        ticker=ticker,
+    )
+    console.print(
+        f"Loaded: {summary.loaded}; evaluated: {summary.evaluated}; "
+        f"deferred: {summary.deferred}; failed: {summary.failed}; "
+        f"correct: {summary.correct}; report: {report_path}"
+    )
     if summary.failed:
         raise typer.Exit(code=1)
 

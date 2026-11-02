@@ -17,7 +17,7 @@ At the end of Wave 1:
 
 **Gate 1:** The fixed dev slice ingests end to end; a sample of 30 triage results selected with seed `2026` has no obvious classification errors; ticker-specific labeled boilerplate recall is at least 90%; at least 80% of audited references in quarterly reports resolve; the five fixed, in-slice seed queries `w0-01`, `w0-04`, `w0-07`, `w0-14`, and `w1-25` return sensible non-boilerplate FTS and vector results; and re-ingestion produces the same logical memory tables. Global-threshold behavior is unit-tested with multiple synthetic tickers but is not claimed as empirically calibrated by the CXO-only dev slice.
 
-**Progress (2026-11-02):** Implementation is complete for the Wave 1 code and 25-question seed. The dev slice has 135 documents done and one known missing-text document skipped, with no outstanding errors after retry. It contains 19,484 chunks and 13,204 vectors at 4,096 dimensions, with no facts or extraction-cache rows. The no-op run made zero LLM calls; all five retrieval checks passed; the current resolver matches 45/45 parsed references in the 13 quarterlies. The preliminary pattern-labeled report estimates 100.0% About Core, 94.2% contact, 100.0% non-material Competent Person, and 97.5% legal-disclaimer recall. Gate 1 remains open for user triage review, manual boilerplate review, and manual reference audit; the global threshold remains provisional until cross-ticker data exists.
+**Progress (2026-11-02):** Implementation is complete for the Wave 1 code and 25-question seed. The dev slice has 135 documents done and one known missing-text document skipped, with no outstanding errors after retry. It contains 19,484 chunks and 13,204 vectors at 4,096 dimensions, with no canonical facts or extraction-cache rows before Wave 2. The no-op run made zero LLM calls; all five retrieval checks passed; the current resolver matches 45/45 parsed references in the 13 quarterlies. The preliminary pattern-labeled report estimates 100.0% About Core, 94.2% contact, 100.0% non-material Competent Person, and 97.5% legal-disclaimer recall. The user accepted the triage, boilerplate, and cross-reference manual reviews on 2026-11-02. Gate 1 is closed for the CXO-only dev slice; the global threshold remains provisional until cross-ticker data exists.
 
 ## Wave 0 baseline and dev slice
 
@@ -66,7 +66,7 @@ Schema version 3 adds `document.form_type`, so a validated form classification s
 - [x] Tests cover all classes, malformed/invalid model output, missing text, metadata hints, and skip-pattern bypass with no LLM call.
 - [x] Schema version 3 migrates existing databases and persists `form_type`.
 - [x] `uv run python scripts/wave1_review.py` writes a 30-result sample with seed `2026` to ignored `var/wave1/triage-review.csv`.
-- [ ] User review of the sample finds no obvious classification errors.
+- [x] User review of the sample finds no obvious classification errors.
 
 ### 1.2 — Boilerplate and warm-up
 
@@ -86,7 +86,7 @@ Schema version 3 adds `document.form_type`, so a validated form classification s
 - [x] Migration from schema version 2 adds `document.form_type`.
 - [x] Tests cover deterministic hashes, exact/near matches, threshold counts by distinct earlier documents, scope separation, equal timestamps, multi-ticker global behavior, and warm-up idempotence.
 - [x] Rebuilding counters after deleting a date range gives the same state as a clean chronological warm-up.
-- [ ] On a manually labeled dev-slice sample of "About Core", contact blocks, Competent Person statements, and standard disclaimers, boilerplate recall is at least 90%. The current pattern-labeled estimate is in `var/wave1/boilerplate-report.md`.
+- [x] On a manually labeled dev-slice sample of "About Core", contact blocks, Competent Person statements, and standard disclaimers, boilerplate recall is at least 90%. The current pattern-labeled estimate is in `var/wave1/boilerplate-report.md`.
 - [x] High-value numeric paragraphs and resource statements remain available; tests cover the material-value guard, and candidate misses/false positives are in `var/wave1/boilerplate-review.csv`.
 
 ### 1.3 — Chunk store
@@ -119,7 +119,7 @@ Schema version 3 adds `document.form_type`, so a validated form classification s
 **Acceptance**
 - [x] Tests cover exact matches, punctuation/quote variants, date parsing, fuzzy threshold, ambiguous candidates, unresolved references, and rejection of future documents.
 - [x] The current resolver matches 45/45 parsed references in the frozen dev-slice quarterlies.
-- [ ] Manually audit the matched quarterly references to confirm they point to the intended earlier announcements.
+- [x] Manually audit the matched quarterly references to confirm they point to the intended earlier announcements.
 - [x] Every stored `doc_xref` target is earlier than its source and satisfies the cited-date window.
 
 ### 1.5 — Orchestrator and CLI
@@ -167,7 +167,7 @@ Schema version 3 adds `document.form_type`, so a validated form classification s
 9. [x] Use a disposable database for full-slice warm-up, ingest, no-op rerun, and re-ingest checks.
 10. [x] Generate and preliminarily inspect the 30-document triage sample with seed `2026` and the boilerplate recall/false-positive report.
 11. [x] Run the five in-slice retrieval queries and expand the gold set to 25 entries.
-12. [ ] Close Gate 1 after user triage review, manual boilerplate review, and manual xref audit.
+12. [x] Close Gate 1 after user triage review, manual boilerplate review, and manual xref audit.
 
 ## Risks to resolve during implementation
 

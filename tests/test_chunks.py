@@ -1,4 +1,5 @@
 import sqlite3
+import struct
 
 import pytest
 
@@ -117,6 +118,28 @@ def test_document_with_only_boilerplate_creates_no_vectors(tmp_path):
     assert client.calls == []
 
 
+def test_create_embeddings_can_include_boilerplate_for_baseline(tmp_path):
+    database_path = tmp_path / "memory.db"
+    initialize_database(database_path)
+    client = FakeEmbeddingClient()
+    chunks = build_chunks(
+        doc_id="doc-1",
+        ticker="CXO",
+        published_at="2026-01-01T00:00:00+00:00",
+        paragraphs=[
+            _paragraph("Financial result: A$12 million."),
+            _paragraph("About Core company information.", True),
+        ],
+    )
+
+    embeddings = create_embeddings(
+        chunks, client, database_path, include_boilerplate=True
+    )
+
+    assert set(embeddings) == {chunk.id for chunk in chunks}
+    assert len(client.calls[0][0]) == 2
+
+
 def test_fts_and_vectors_exclude_boilerplate_and_delete_cleanly(tmp_path):
     database_path = tmp_path / "memory.db"
     initialize_database(database_path, vector_dimensions=3)
@@ -137,6 +160,12 @@ def test_fts_and_vectors_exclude_boilerplate_and_delete_cleanly(tmp_path):
         _insert_document(connection)
         persist_chunks(connection, chunks, embeddings)
         assert [item.id for item in search_fts(connection, "About Core")] == []
+        assert [
+            item.id
+            for item in search_fts(
+                connection, "About Core", include_boilerplate=True
+            )
+        ] == [chunks[0].id]
         assert [item.id for item in search_vectors(connection, [0.0, 0.0, 0.0])] == [
             chunks[1].id
         ]
@@ -194,3 +223,57 @@ def test_search_rejects_invalid_limits():
 def test_vector_search_reports_uninitialized_tables():
     with pytest.raises(RuntimeError, match="not initialized"):
         search_vectors(sqlite3.connect(":memory:"), [0.0, 0.0, 0.0])
+
+
+def test_search_filters_ticker_and_date_after_vector_overfetch(tmp_path):
+    database_path = tmp_path / "memory.db"
+    initialize_database(database_path, vector_dimensions=3)
+    with database_connection(database_path) as connection:
+        for index in range(7):
+            ticker = "OTHER" if index % 2 else "CXO"
+            published_at = (
+                "2026-01-01T00:00:00+00:00"
+                if index < 6
+                else "2025-01-01T00:00:00+00:00"
+            )
+            doc_id = f"doc-{index}"
+            connection.execute(
+                """
+                INSERT INTO document (
+                    id, ticker, folder, headline, published_at, text_source
+                ) VALUES (?, ?, ?, 'Example', ?, 'v1')
+                """,
+                (doc_id, ticker, doc_id, published_at),
+            )
+            chunk_id = f"{doc_id}:00000"
+            connection.execute(
+                """
+                INSERT INTO chunk (
+                    id, doc_id, ticker, published_at, ord, text
+                ) VALUES (?, ?, ?, ?, 0, ?)
+                """,
+                (chunk_id, doc_id, ticker, published_at, f"cash result {index}"),
+            )
+            vector = [0.01, 0.0, 0.0] if index < 6 else [1.0, 0.0, 0.0]
+            connection.execute(
+                "INSERT INTO chunk_vec (embedding, chunk_id) VALUES (?, ?)",
+                (sqlite3.Binary(struct.pack("<3f", *vector)), chunk_id),
+            )
+
+        results = search_vectors(
+            connection,
+            [0.0, 0.0, 0.0],
+            limit=1,
+            ticker="CXO",
+            knowledge_date="2025-12-31",
+        )
+        fts_results = search_fts(
+            connection,
+            "cash",
+            ticker="CXO",
+            knowledge_date="2025-12-31",
+        )
+
+    assert [item.doc_id for item in results] == ["doc-6"]
+    assert all(item.ticker == "CXO" for item in fts_results)
+    assert all(item.published_at.startswith("2025-") for item in fts_results)

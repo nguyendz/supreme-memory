@@ -7,10 +7,23 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
+_LOCAL_CHAT_MODELS = frozenset(
+    {
+        "qwen3.5:9b",
+        "gemma4",
+        "gemma4:latest",
+        "nimble",
+        "nimble:latest",
+    }
+)
+_LOCAL_EMBEDDING_MODELS = frozenset(
+    {"qwen3-embedding", "qwen3-embedding:latest"}
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +41,34 @@ class AppConfig:
     keep_alive: str
     timeout_seconds: float
     skip_headline_patterns: tuple[str, ...]
+
+
+def validate_wave2_local_runtime(
+    config: AppConfig,
+    *,
+    require_chat_model: bool = True,
+    require_embedding_model: bool = True,
+) -> None:
+    """Reject non-loopback hosts and model names outside the Wave 2 local set."""
+    host = urlsplit(config.ollama_host)
+    if host.scheme not in {"http", "https"} or host.hostname not in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }:
+        raise ValueError("Wave 2 requires an Ollama host on the local machine")
+    if require_chat_model and config.ollama_model not in _LOCAL_CHAT_MODELS:
+        raise ValueError(
+            f"Wave 2 chat model must be local and supported: {config.ollama_model}"
+        )
+    if (
+        require_embedding_model
+        and config.embedding_model not in _LOCAL_EMBEDDING_MODELS
+    ):
+        raise ValueError(
+            "Wave 2 embedding model must be local and supported: "
+            f"{config.embedding_model}"
+        )
 
 
 def _section(data: dict[str, Any], name: str) -> dict[str, Any]:

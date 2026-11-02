@@ -239,6 +239,8 @@ Detailed execution checklist: see [wave-1-plan.md](./wave-1-plan.md).
 
 Depends on Wave 1. The 🛠 and 🔎 items don't depend on each other.
 
+Detailed execution checklist: see [wave-2-plan.md](./wave-2-plan.md).
+
 | ID | Track | Item | Files | Done when |
 |---|---|---|---|---|
 | 2.1 | 🛠 | Extraction: candidate-fact schema, prompt with PIT context (known entities, attributes, xref titles), tiers T0–T3, long-doc split by page/section. **Cache raw output** in `extraction_cache(doc_id, model, prompt_version)` so reconciliation can be re-run without the LLM | `pipeline/extract.py`, `prompts/extract.md` | Runs on the dev slice. ≥ 98% valid JSON |
