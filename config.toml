@@ -1,0 +1,15 @@
+[paths]
+data_dir = "data"
+database = "var/memory.db"
+
+[ollama]
+host = "http://localhost:11434"
+model = "qwen3.5:9b"
+embedding_model = "qwen3-embedding"
+num_ctx = 32768
+num_predict = 1024
+keep_alive = "30m"
+timeout_seconds = 300
+
+[ingest]
+skip_headline_patterns = []
