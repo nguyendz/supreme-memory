@@ -31,6 +31,7 @@ from agent_memory.pipeline.reconcile import (
 )
 from agent_memory.query.agent import answer_memory
 from agent_memory.query.baseline_rag import answer_baseline, build_baseline_index
+from agent_memory.query_ui import create_query_server
 from agent_memory.query.pit import (
     current_facts_at,
     fact_sources_at,
@@ -693,6 +694,62 @@ def ask(
         console.print(f"[dim]{citation.quote}[/dim]")
         if citation.source_path:
             console.print(f"[dim]Source: {citation.source_path}[/dim]")
+
+
+@app.command("ui")
+def query_ui(
+    database: Path | None = typer.Option(
+        None,
+        "--database",
+        exists=True,
+        dir_okay=False,
+        help="Memory database to query; defaults to the configured database.",
+    ),
+    model: str | None = typer.Option(
+        None, "--model", help="Approved local generation model."
+    ),
+    port: int = typer.Option(
+        8765,
+        "--port",
+        min=0,
+        max=65535,
+        help="Local web server port; use 0 to choose an available port.",
+    ),
+    open_browser: bool = typer.Option(
+        True, "--open/--no-open", help="Open the local query UI in the browser."
+    ),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml."),
+) -> None:
+    """Run the local Wave 4 query and source-evidence interface."""
+    settings = _load_settings(config)
+    database_path = database or settings.database_path
+    if not database_path.is_file():
+        raise typer.BadParameter(f"Memory database not found: {database_path}")
+    selected_model = model or settings.ollama_model
+    if selected_model not in APPROVED_EXTRACTION_MODELS:
+        raise typer.BadParameter(
+            "Query answering requires an approved local generation model "
+            "(qwen3.5:9b or gemma4)"
+        )
+    _validate_wave2_runtime(settings, require_chat_model=False)
+
+    server = create_query_server(
+        settings,
+        database_path,
+        model=selected_model,
+        port=port,
+    )
+    url = f"http://127.0.0.1:{server.server_port}/"
+    console.print(f"Wave 4 query UI: {url}")
+    if open_browser and not webbrowser.open(url):
+        console.print("[yellow]Could not open a browser automatically.[/yellow]")
+    console.print("Press Ctrl+C to stop the local UI.")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        console.print("\nWave 4 query UI stopped.")
+    finally:
+        server.server_close()
 
 
 def _show_database_path(database: Path | None, config: Path | None) -> Path:

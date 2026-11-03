@@ -36,17 +36,22 @@ Gate 2.
 - Wave 3 code and synthetic tests are implemented. The full dev-slice source
   DB `var/wave1/dev.db` remains schema v3 with zero entity, attribute, fact,
   and fact-source rows; it must remain unchanged.
-- The isolated `var/wave3/pilot.db` has been created from the September 2026
-  quarterly only. It contains 13 `ADD` facts, zero quote rejects, and zero
-  unresolved decisions. The cash-balance fact is PIT-visible on
-  `2026-10-15`; it is not visible on `2026-10-12`.
+- `var/wave3/pilot.db` is an isolated full copy of the Wave 1 source DB, not a
+  pruned one-document database: it contains all 1,316 documents, 19,484 chunks,
+  and 236 extraction-cache rows in the 1,316-document target corpus. Only the
+  September 2026 quarterly was reconciled, producing 13 `ADD` facts, zero
+  quote rejects, and zero unresolved decisions. Thus canonical document
+  coverage is 1/1,316 (0.08%), even though raw-corpus coverage in the copy is
+  100%. The cash-balance fact is PIT-visible on `2026-10-15`; it is not visible
+  on `2026-10-12`.
 - The pilot fact's stored attribute is `cash_balance_as_of`, illustrating that
   query routing must use the actual active attribute choices rather than
   assuming every model emits the exact string `cash_balance`.
 - Wave 4 query code is implemented for state, timeline, event/search, and
   summary intents, with point-in-time fact retrieval, lexical/vector search,
   optional chunk fallback, citation validation, and source inspection commands.
-  Synthetic tests cover these routes and `am show fact/entity/timeline`.
+  The loopback-only `am ui` interface shows answers alongside their source
+  quotes; synthetic tests cover these routes and the `am show` commands.
 - The real `w0-01` query was rerun on the isolated pilot DB after schema
   migration 6. It answered A$200 million and displayed the quarterly's source
   quote and path. The `get_state` tool call was recorded with one result and
@@ -185,6 +190,9 @@ The pilot does not close Gate 2 or Gate 4.
 
 **Implementation**
 
+- Add `am ui`, a loopback-only browser interface with ticker, knowledge date,
+  question, and optional source-passage fallback controls. Display the answer,
+  announcement metadata, exact citation quote, and source path.
 - `am ask` currently defaults to memory mode; keep `--baseline` as an explicit
   comparison mode. The default does not imply that Gate 4 has passed.
 - Require `--as-of` for memory mode and require or unambiguously infer ticker.
@@ -197,6 +205,8 @@ The pilot does not close Gate 2 or Gate 4.
 
 - `am ask --memory ...` and `am ask --baseline ...` select distinct explicit
   paths; one mode never falls back to the other silently.
+- `am ui --database var/wave3/pilot.db` can run the one-query pilot in a local
+  browser, and displays the same validated answer/evidence as `am ask`.
 - A user can follow every citation to a source document and inspect its
   underlying quote.
 
@@ -219,8 +229,8 @@ The pilot does not close Gate 2 or Gate 4.
 ## Test sequence and remaining gates
 
 1. **Done:** unit-test the typed planner, retrieval filters, answer schema,
-   citation materialization, vector retrieval, telemetry, and inspection
-   commands with synthetic databases.
+   citation materialization, vector retrieval, telemetry, browser UI, and
+   inspection commands with synthetic databases.
 2. **Done:** rerun `w0-01` on `var/wave3/pilot.db`; verify its A$200 million
    answer, source quote, and recorded memory tool call.
 3. **Pending user review:** judge the displayed answer and source evidence; no

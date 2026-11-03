@@ -12,11 +12,15 @@ pilot-database safeguards in this query implementation.
 
 ## Current status (2026-11-03)
 
-The Gemma one-document pilot has created `var/wave3/pilot.db` with 13 added
-facts, zero quote rejects, and zero unresolved decisions. The cash-balance
-fact is visible at the `w0-01` knowledge date, cites the September quarterly,
-and is not visible before that document's publication date. The source database
-remains unchanged. The memory-backed `am ask` path below is still unimplemented.
+The Gemma one-document reconciliation created 13 facts, with zero quote
+rejects and zero unresolved decisions. `var/wave3/pilot.db` is a full isolated
+copy of the 1,316-document source database: all 19,484 chunks and 236
+extraction-cache rows are present, while only the September 2026 quarterly has
+canonical facts. The cash-balance fact is visible at the `w0-01` knowledge
+date, cites the quarterly, and is not visible before its publication date.
+The source database remains unchanged. The memory-backed `am ask` and browser
+UI paths are implemented and have returned the expected answer and source;
+the formal 10-question Gate 4 remains open.
 
 ## Scope
 
@@ -25,8 +29,9 @@ remains unchanged. The memory-backed `am ask` path below is still unimplemented.
 - One current-state query: gold question `w0-01`, “What was CXO's cash balance
   at 30 September 2026?”
 - Ticker `CXO`, inclusive `knowledge_date=2026-10-15`.
-- The isolated one-document pilot DB and the explicitly selected extraction
-  model used to build it.
+- The isolated full-source DB copy, with Wave 3 reconciliation limited to the
+  one pilot document, and the explicitly selected extraction model used to
+  build that document's facts.
 - A query planner for the `state` intent, retrieval through Wave 3 PIT
   functions, a constrained answer, and validated source display.
 
