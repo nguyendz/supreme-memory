@@ -110,11 +110,14 @@ class LLMClient:
         doc_id: str | None = None,
         model: str | None = None,
         num_predict: int | None = None,
+        step: str = "chat_json",
     ) -> ChatResult[ModelT]:
         """Request schema-constrained JSON and retry once on validation failure."""
         selected_model = model or self._config.ollama_model
         if not selected_model.strip():
             raise ValueError("model must not be blank")
+        if not step.strip():
+            raise ValueError("step must not be blank")
         selected_num_predict = (
             self._config.num_predict if num_predict is None else num_predict
         )
@@ -143,7 +146,7 @@ class LLMClient:
             except (ollama.ResponseError, httpx.HTTPError) as exc:
                 elapsed_ms = (time.perf_counter() - started) * 1000
                 self._record(
-                    step="chat_json",
+                    step=step,
                     doc_id=doc_id,
                     model=selected_model,
                     attempt=attempt,
@@ -186,7 +189,7 @@ class LLMClient:
                 value = response_model.model_validate_json(content)
             except ValidationError as exc:
                 self._record(
-                    step="chat_json",
+                    step=step,
                     doc_id=doc_id,
                     model=selected_model,
                     attempt=attempt,
@@ -216,7 +219,7 @@ class LLMClient:
                 continue
 
             self._record(
-                step="chat_json",
+                step=step,
                 doc_id=doc_id,
                 model=selected_model,
                 attempt=attempt,

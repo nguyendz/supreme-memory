@@ -246,7 +246,7 @@ Detailed execution checklist: see [wave-2-plan.md](./wave-2-plan.md).
 | 2.1 | 🛠 | Extraction: candidate-fact schema, prompt with PIT context (known entities, attributes, xref titles), tiers T0–T3, long-doc split by page/section. **Cache raw output** in `extraction_cache(doc_id, model, prompt_version)` so reconciliation can be re-run without the LLM | `pipeline/extract.py`, `prompts/extract.md` | Runs on the dev slice. ≥ 98% valid JSON |
 | 2.2 | 🛠 | Form schemas: Appendix 2A/3B (shares issued / on issue), director interest, substantial holder | `prompts/forms/*.md` | 10 sample forms extract correctly |
 | 2.3 | 🛠 | Quote check: normalised fuzzy-substring match, reject + log | `pipeline/quotecheck.py` | ≥ 90% of candidate facts pass. Rejected facts reviewed for leakage or misquotes |
-| 2.4 | 🛠 | Model comparison: run 2.1 on 10 fixed docs with `qwen3.5:9b`, `gemma4`, `nimble` → side-by-side report | `scripts/compare_models.py` | Report in `var/eval/models.md`. Default model confirmed |
+| 2.4 | 🛠 | Compare eligible generation models on 10 fixed docs. The historical 30-run comparison included `nimble`, but local metadata identifies it as decision-only; do not use its score to select an extraction model | `scripts/compare_models.py` | Side-by-side report in `var/eval/models.md`; default selected only from eligible generation models |
 | 2.5 | 🔎 | Baseline RAG: top-k chunks (FTS + vector) with `published_at <= knowledge_date`, answer prompt with citations | `query/baseline_rag.py` | `am ask --baseline --as-of …` answers with citations |
 | 2.6 | 🔎 | Eval harness: load gold set, run answering, LLM-judge accuracy, citation validity (date ≤ T, quote exists), context tokens, write report | `eval/run_eval.py` | `am eval --baseline` produces **baseline numbers** |
 | 2.7 | 👤 | Hand-review T1 facts for 5 quarterlies (completeness and tier labels) | review notes | Missing or incorrect items fed back into the prompt |
@@ -256,6 +256,8 @@ Detailed execution checklist: see [wave-2-plan.md](./wave-2-plan.md).
 ### Wave 3 — Memory: resolve, reconcile, point-in-time views
 
 Depends on Wave 2 (it works from `extraction_cache`, so it doesn't need to call the LLM again for extraction). 3.4 needs only the schema and can be built alongside 3.1–3.3.
+
+Detailed execution checklist: see [wave-3-plan.md](./wave-3-plan.md).
 
 | ID | Track | Item | Files | Done when |
 |---|---|---|---|---|
@@ -328,7 +330,7 @@ Depends on Wave 3. Reuses the answer prompt and citation format from 2.5.
 
 | Risk | Mitigation |
 |---|---|
-| 9B model gives inconsistent attributes/entities → keys don't match → duplicates | Feed the known attribute and entity list into the prompt. Embedding + judge fallback. Track the duplicate rate (H1). Try `gemma4` / `nimble` |
+| 9B model gives inconsistent attributes/entities → keys don't match → duplicates | Feed the known attribute and entity list into the prompt. Embedding + judge fallback. Track the duplicate rate (H1). Compare eligible generation models such as `qwen3.5:9b` and `gemma4`; exclude decision-only models from fact extraction |
 | Model adds facts from its own knowledge (leak) | Quote check. Prompt: "only facts stated in the text". The leakage sweep in eval |
 | Long docs (prospectus, annual reports) are slow or lose detail | Split by section or page, extract per part. Cap per-doc time. Annual reports are mostly T2 detail anyway |
 | JSON or schema failures | Ollama `format` schema + pydantic validation + 1 retry with the error message, then mark the doc `error` and move on |

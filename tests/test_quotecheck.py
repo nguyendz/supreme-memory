@@ -1,4 +1,10 @@
-from agent_memory.pipeline.quotecheck import check_quote, contains_exact_quote
+import csv
+
+from agent_memory.pipeline.quotecheck import (
+    append_quote_rejections,
+    check_quote,
+    contains_exact_quote,
+)
 
 
 def test_quote_check_normalizes_unicode_case_punctuation_and_whitespace():
@@ -63,3 +69,21 @@ def test_exact_citation_helper_does_not_accept_fuzzy_quotes():
         "Cash balance was A$200 million",
         "Cash balance was A$201 million.",
     )
+
+
+def test_quote_rejection_report_deduplicates_replayed_cache_results(tmp_path):
+    report_path = tmp_path / "quote-rejections.csv"
+    rejection = {
+        "document_id": "doc-1",
+        "candidate_text": "Cash balance was misstated.",
+        "quote": "Invented quote that is not in this source.",
+        "segment_id": "segment-0000",
+        "reason": "quote is not present",
+    }
+
+    append_quote_rejections(report_path, **rejection)
+    append_quote_rejections(report_path, **rejection)
+
+    with report_path.open(encoding="utf-8", newline="") as report_file:
+        rows = list(csv.DictReader(report_file))
+    assert rows == [rejection]

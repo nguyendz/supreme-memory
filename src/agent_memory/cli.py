@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import webbrowser
 from collections import Counter
 from datetime import date
 from pathlib import Path
@@ -18,7 +19,13 @@ from agent_memory.loader import discover_announcements
 from agent_memory.pipeline.extract import run_extraction
 from agent_memory.pipeline.ingest import run_ingest
 from agent_memory.pipeline.review import export_t1_review
+from agent_memory.pipeline.reconcile import (
+    APPROVED_EXTRACTION_MODELS,
+    preflight_reconciliation,
+    run_reconciliation,
+)
 from agent_memory.query.baseline_rag import answer_baseline, build_baseline_index
+from agent_memory.review_ui import generate_model_review_ui
 
 
 app = typer.Typer(no_args_is_help=True, help="Local company-announcement memory.")
@@ -297,6 +304,157 @@ def t1_review(
     )
     for doc_id in summary.stale_or_missing:
         console.print(f"[yellow]No current extraction cache: {doc_id}[/yellow]")
+
+
+@app.command("reconcile")
+def reconcile(
+    database: Path = typer.Option(
+        ...,
+        "--database",
+        exists=True,
+        dir_okay=False,
+        help="Isolated source database with extraction caches.",
+    ),
+    model: str | None = typer.Option(
+        None, "--model", help="Approved extraction-cache model to reconcile."
+    ),
+    ticker: str | None = typer.Option(None, help="Limit to this ticker."),
+    from_date: str | None = typer.Option(
+        None, "--from", help="Inclusive UTC publication date."
+    ),
+    to_date: str | None = typer.Option(
+        None, "--to", help="Inclusive UTC publication date."
+    ),
+    limit: int | None = typer.Option(None, min=1, help="Limit sorted documents."),
+    replay: bool = typer.Option(
+        False, "--replay", help="Clear and rebuild all canonical memory for --ticker."
+    ),
+    preflight: bool = typer.Option(
+        False, "--preflight", help="Validate caches and quotes without writing facts."
+    ),
+    confirm_wave2_gate: bool = typer.Option(
+        False,
+        "--confirm-wave2-gate",
+        help="Confirm Wave 2 review and extraction-quality gates are accepted.",
+    ),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml."),
+) -> None:
+    """Reconcile quote-verified extraction caches into point-in-time memory."""
+    settings = _load_settings(config)
+    selected_model = model or settings.ollama_model
+    if selected_model not in APPROVED_EXTRACTION_MODELS:
+        raise typer.BadParameter(
+            "Reconciliation requires an approved extraction model "
+            "(qwen3.5:9b or gemma4); decision-only models are not accepted"
+        )
+    try:
+        start = _parse_cli_date(from_date, "--from")
+        end = _parse_cli_date(to_date, "--to")
+        if preflight:
+            if replay or confirm_wave2_gate:
+                raise typer.BadParameter(
+                    "--preflight cannot be combined with --replay or "
+                    "--confirm-wave2-gate"
+                )
+            result = preflight_reconciliation(
+                database,
+                model=selected_model,
+                ticker=ticker,
+                start_date=start,
+                end_date=end,
+                limit=limit,
+            )
+            console.print(
+                f"Preflight for {selected_model}: {result.current_caches}/"
+                f"{result.requested_documents} current caches; "
+                f"unsupported forms: {len(result.unsupported)}; "
+                f"quote verified: {result.quote_verified}; "
+                f"quote rejected: {result.quote_rejected}; T0: "
+                f"{result.t0_candidates}; recovery-capped: {result.recovery_capped}"
+            )
+            for doc_id in result.missing:
+                console.print(f"[yellow]Missing cache: {doc_id}[/yellow]")
+            for doc_id in result.stale:
+                console.print(f"[yellow]Stale cache: {doc_id}[/yellow]")
+            for doc_id, error in result.invalid:
+                console.print(f"[red]Invalid cache {doc_id}: {error}[/red]")
+            if result.missing or result.stale or result.invalid:
+                raise typer.Exit(code=1)
+            return
+        if not confirm_wave2_gate:
+            raise typer.BadParameter(
+                "Do not promote candidate facts until Wave 2 Gate 2 is accepted"
+            )
+        _validate_wave2_runtime(settings, require_chat_model=False)
+        client = LLMClient(settings, database)
+        summary = run_reconciliation(
+            database,
+            client,
+            model=selected_model,
+            ticker=ticker,
+            start_date=start,
+            end_date=end,
+            limit=limit,
+            replay=replay,
+            confirm_wave2_gate=confirm_wave2_gate,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    console.print(
+        f"Reconciled {summary.processed}/{summary.documents} documents with "
+        f"{summary.model}: ADD {summary.added}, CONFIRM {summary.confirmed}, "
+        f"SUPERSEDE {summary.superseded}; T0 ignored {summary.ignored_t0}; "
+        f"quote rejected {summary.quote_rejected}; unresolved {summary.unresolved}; "
+        f"unsupported forms {summary.unsupported}"
+    )
+    if summary.add_ratio is not None:
+        console.print(f"ADD ratio: {summary.add_ratio:.1%}")
+    console.print(
+        f"LLM calls: {summary.llm_calls}; decision cache hits: "
+        f"{summary.decision_cache_hits}; prompt tokens: {summary.prompt_tokens}; "
+        f"output tokens: {summary.output_tokens}; "
+        f"elapsed: {summary.elapsed_seconds:.2f}s"
+    )
+    for result in summary.document_results:
+        console.print(
+            f"{result.document_id}: ADD {result.added}, "
+            f"CONFIRM {result.confirmed}, SUPERSEDE {result.superseded}; "
+            f"unresolved {result.unresolved}; "
+            f"quote rejected {result.quote_rejected}"
+        )
+    for doc_id in summary.stale_or_missing:
+        console.print(f"[yellow]Missing or stale cache: {doc_id}[/yellow]")
+    for doc_id, error in summary.errors:
+        console.print(f"[red]Failed {doc_id}: {error}[/red]")
+    if summary.stale_or_missing or summary.errors:
+        raise typer.Exit(code=1)
+
+
+@app.command("review-models")
+def review_models(
+    database: Path = typer.Option(
+        ...,
+        "--database",
+        exists=True,
+        dir_okay=False,
+        help="Isolated source database containing model-comparison caches.",
+    ),
+    output: Path | None = typer.Option(
+        None, "--output", help="Standalone HTML review UI output path."
+    ),
+    open_browser: bool = typer.Option(
+        False, "--open", help="Open the generated UI in the default browser."
+    ),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml."),
+) -> None:
+    """Generate a local browser UI for comparing cached extraction models."""
+    settings = _load_settings(config)
+    output_path = output or settings.project_root / "var" / "eval" / "model-review.html"
+    generate_model_review_ui(database, output_path)
+    console.print(f"Model review UI: {output_path.resolve()}")
+    if open_browser and not webbrowser.open(output_path.resolve().as_uri()):
+        console.print("[yellow]Could not open a browser automatically.[/yellow]")
 
 
 @app.command("baseline-index")

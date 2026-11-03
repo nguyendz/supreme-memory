@@ -40,8 +40,10 @@ _ABSTENTION_PATTERN = re.compile(
     r"insufficient\s+(?:information|evidence)|"
     r"no\s+(?:relevant|supporting)\s+(?:information|evidence|source)|"
     r"does\s+not\s+answer|"
-    r"(?:do|does)\s+not\s+(?:contain|provide|include)|"
-    r"(?:don't|doesn't)\s+(?:contain|provide|include)|"
+    r"(?:do|does)\s+not\s+"
+    r"(?:contain|provide|include|specify|state|detail|mention|identify|report)|"
+    r"(?:don't|doesn't)\s+"
+    r"(?:contain|provide|include|specify|state|detail|mention|identify|report)|"
     r"not\s+(?:stated|reported|available|found)|"
     r"i\s+don't\s+know"
     r")\b",

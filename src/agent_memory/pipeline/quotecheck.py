@@ -15,6 +15,16 @@ MIN_QUOTE_CHARACTERS = 20
 FUZZY_THRESHOLD = 0.90
 MAX_FUZZY_QUOTE_CHARACTERS = 500
 MAX_FUZZY_WINDOWS = 2500
+_REJECTION_KEYS_BY_PATH: dict[Path, set[tuple[str, ...]]] = {}
+
+
+_REJECTION_FIELDS = (
+    "document_id",
+    "candidate_text",
+    "quote",
+    "segment_id",
+    "reason",
+)
 
 
 @dataclass(frozen=True)
@@ -159,26 +169,35 @@ def append_quote_rejections(
 ) -> None:
     """Append rejected evidence details to a local review CSV."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_path = path.resolve()
+    existing_keys = _REJECTION_KEYS_BY_PATH.get(resolved_path)
+    if existing_keys is None:
+        existing_keys = set()
+        if path.is_file():
+            with path.open("r", encoding="utf-8", newline="") as input_file:
+                reader = csv.DictReader(input_file)
+                existing_keys.update(
+                    tuple((row.get(field) or "") for field in _REJECTION_FIELDS)
+                    for row in reader
+                )
+        _REJECTION_KEYS_BY_PATH[resolved_path] = existing_keys
+    rejection = {
+        "document_id": document_id,
+        "candidate_text": candidate_text,
+        "quote": quote,
+        "segment_id": segment_id,
+        "reason": reason,
+    }
+    key = tuple(rejection[field] for field in _REJECTION_FIELDS)
+    if key in existing_keys:
+        return
     write_header = not path.exists() or path.stat().st_size == 0
     with path.open("a", encoding="utf-8", newline="") as output_file:
         writer = csv.DictWriter(
             output_file,
-            fieldnames=(
-                "document_id",
-                "candidate_text",
-                "quote",
-                "segment_id",
-                "reason",
-            ),
+            fieldnames=_REJECTION_FIELDS,
         )
         if write_header:
             writer.writeheader()
-        writer.writerow(
-            {
-                "document_id": document_id,
-                "candidate_text": candidate_text,
-                "quote": quote,
-                "segment_id": segment_id,
-                "reason": reason,
-            }
-        )
+        writer.writerow(rejection)
+    existing_keys.add(key)

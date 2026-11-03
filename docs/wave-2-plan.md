@@ -11,6 +11,7 @@ At the end of Wave 2:
 - Candidate facts have self-contained text, a tier, and an evidence quote that passes deterministic source checking.
 - The four supported form families have schema-specific prompts and tests.
 - A local model comparison report records extraction quality and latency for ten fixed documents.
+- A local browser UI compares cached model outputs and preserves user review decisions separately.
 - `am ask --baseline --as-of ...` retrieves only chunks published on or before `knowledge_date` and returns citations.
 - `am eval --baseline` produces a baseline report for all eligible gold questions.
 - The five-quarterly T1 review file is ready for user review.
@@ -19,7 +20,23 @@ At the end of Wave 2:
 
 ## Implementation status
 
-The Wave 2 extraction, form routing, quote checking, baseline retrieval, evaluation, model-comparison, and T1-review code paths and focused tests are implemented. The user accepted the Wave 1 triage, boilerplate, and quarterly cross-reference reviews on 2026-11-02; the gated dev-slice extraction is now in progress. The isolated baseline index contains 19,484/19,484 chunks at 4,096 dimensions. The local baseline evaluation completed 24 in-corpus questions, deferred only `w0-09`, and recorded 12/24 judge-agreed answers (50.0%), zero failed runs, zero out-of-date citations, and zero invalid quotes; see ignored `var/eval/baseline.md`. The local Qwen model remains provisional until the fixed extraction-model comparison and user review. Extraction and model-comparison commands still require `--confirm-wave1-gate`; the evaluation harness counts a source as in-corpus only when it has searchable chunks, not merely a catalog row.
+The Wave 2 code paths and tests are implemented. The user accepted the Wave 1 triage, boilerplate, and quarterly cross-reference reviews on 2026-11-02. Qwen extraction completed with current caches for all 108 supported documents; 16 forms are explicitly unsupported and no candidates remain unprocessed. Recovery extraction preserved full raw responses while recording 67 lower-priority facts capped from dense segments. Logged Qwen extraction/comparison calls were schema-valid on the first attempt or one retry in 664/750 cases (88.5%), below the 98% Gate 2 target; the Qwen non-T0 quote-pass rate is 88.9% (3,854/4,333), below the 90% target.
+
+The user selected Gemma 4 as the provisional default and Qwen 3.5 as a manual alternate, then requested a full-slice Gemma refresh. Gemma extraction completed with caches for all 108 supported documents and no failures. Its full-slice non-T0 quote-pass rate is 82.4% (1,136/1,379). The Gemma T1 review has 28 candidates versus 142 in the preserved Qwen review; on the January, April, and July 2025 quarterlies Gemma produced one T1 candidate each. Keep Gemma provisional pending user review of `var/eval/t1-review.csv` and `var/eval/t1-review-qwen.csv`. The initial Qwen spot-check of the first eight January 2025 T1 rows found source-backed quotes, a rounded/precise duplicate cash balance, a stockpile fact split across two attributes, and capital-structure items worth considering for T1 versus T2.
+
+The isolated baseline index contains 19,484/19,484 chunks at 4,096 dimensions. The Qwen baseline evaluation completed 24 in-corpus questions, deferred only `w0-09`, and recorded 12/24 judge-agreed answers (50.0%), zero failed runs, zero out-of-date citations, and zero invalid quotes; see ignored `var/eval/baseline.md`. The Gemma baseline evaluation recorded 13/24 judge-agreed answers (54.2%), one citation-validation failure, and zero out-of-date citations; see ignored `var/eval/baseline-gemma.md`. The fixed extraction-model comparison completed all 30 runs: aggregate non-T0 quote pass was 87.8% for `qwen3.5:9b`, 90.9% for `gemma4`, and 87.1% for `nimble`; see ignored `var/eval/models.md`. `config.toml` uses provisional `gemma4`, with Qwen available via `AM_LLM_MODEL=qwen3.5:9b`. Gate 2 remains open pending T1 review and quote/schema quality; the evaluation harness counts a source as in-corpus only when it has searchable chunks, not merely a catalog row.
+
+The historical `nimble` comparison is not a like-for-like extraction result. Local Ollama metadata identifies it as a decision model with a one-choice output instruction, so its 87.1% quote-pass figure must not be used to select or evaluate a generative extraction model. Wave 3 excludes `nimble` from canonical fact promotion.
+
+## Reviewing the model comparison
+
+Generate and open the standalone local review UI with:
+
+```powershell
+uv run am review-models --database var/wave1/dev.db --open
+```
+
+The UI compares the cached Qwen, Gemma, and Nimble facts for each of the ten fixed documents, including quote checks, source segments, raw model JSON, usage metrics, and recovery-cap counts. Preferences, per-candidate decisions, and notes are stored in browser-local storage and can be downloaded as JSON or CSV. The command makes no model calls and does not modify extraction caches.
 
 ## Entry conditions and scope
 
@@ -135,7 +152,7 @@ Each extracted candidate should validate against a fixed schema before it is cac
 
 **Acceptance**
 - [x] Tests cover Unicode/whitespace variants, exact quotes, bounded fuzzy matches, short/ambiguous quotes, wrong-source quotes, and invented text.
-- [ ] At least 90% of non-T0 candidates pass quote checking; rejected examples are reviewed for hallucination, OCR noise, and poor segmentation.
+- [ ] At least 90% of non-T0 candidates pass quote checking; rejected examples are reviewed for hallucination, OCR noise, and poor segmentation. Current measured pass rate: 88.9%.
 
 ### 2.4 — Local model comparison
 
@@ -149,8 +166,8 @@ The five fixed `full` inputs are `20261013-2139-Quarterly-Activities-and-Cashflo
 **Files:** `scripts/compare_models.py`, `var/eval/models.md` (generated, git-ignored), `tests/test_compare_models.py`.
 
 **Acceptance**
-- [ ] The report contains all 30 model/document runs and links each result to the same fixed source document.
-- [ ] The user confirms the default model; no cloud model is used.
+- [x] The report contains all 30 model/document runs and links each result to the same fixed source document.
+- [x] The user confirms the default model; no cloud model is used.
 
 ### 2.5 — Naive chunk-RAG baseline
 
@@ -195,7 +212,7 @@ The five fixed `full` inputs are `20261013-2139-Quarterly-Activities-and-Cashflo
 - Feed user corrections into `prompts/extract.md` before closing Gate 2; do not hand-edit model outputs in the cache.
 
 **Acceptance**
-- [ ] The review file has all T1 candidates from the five fixed quarterlies.
+- [x] The review file has all T1 candidates from the five fixed quarterlies.
 - [ ] User review records missing/incorrect facts and tier corrections.
 
 ## Execution order
@@ -220,6 +237,7 @@ The five fixed `full` inputs are `20261013-2139-Quarterly-Activities-and-Cashflo
 - After the manual Gate 1 reviews are accepted, run extraction with `uv run am extract --database var/wave1/dev.db --confirm-wave1-gate`.
 - After Gate 1, compare extraction models with `uv run python scripts/compare_models.py --database var/wave1/dev.db --confirm-wave1-gate`.
 - Export available T1 candidates for review with `uv run am t1-review --database var/wave1/dev.db`.
+- To use the manual Qwen alternate for a PowerShell command, set `$env:AM_LLM_MODEL = 'qwen3.5:9b'` first. There is no automatic model failover.
 
 Wave 2 commands reject non-loopback Ollama hosts and unsupported/cloud model names. Extraction commands require explicit Gate 1 confirmation and never write canonical `fact`, `fact_source`, `entity`, or `attribute` rows.
 

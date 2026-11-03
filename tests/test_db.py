@@ -65,7 +65,14 @@ def test_database_migrations_are_idempotent_and_fts_tracks_chunks(tmp_path):
         versions = connection.execute(
             "SELECT version FROM schema_migrations"
         ).fetchall()
-        assert [row["version"] for row in versions] == [1, 2, 3]
+        assert [row["version"] for row in versions] == [1, 2, 3, 4]
+        tables = {
+            row["name"]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        assert {"reconciliation_cache", "reconciliation_review"} <= tables
 
 
 def test_vector_tables_use_actual_embedding_width(tmp_path):
@@ -77,10 +84,18 @@ def test_vector_tables_use_actual_embedding_width(tmp_path):
             "INSERT INTO chunk_vec (embedding, chunk_id) VALUES (?, ?)",
             (sqlite3.Binary(bytes(12)), "chunk-1"),
         )
+        connection.execute(
+            "INSERT INTO entity_vec (embedding, entity_id) VALUES (?, ?)",
+            (sqlite3.Binary(bytes(12)), "entity-1"),
+        )
         dimensions = connection.execute(
             "SELECT dimensions FROM vector_metadata WHERE name = 'default'"
         ).fetchone()["dimensions"]
         assert dimensions == 3
+        entity_vector_count = connection.execute(
+            "SELECT COUNT(*) FROM entity_vec"
+        ).fetchone()[0]
+        assert entity_vector_count == 1
 
     try:
         initialize_database(database_path, vector_dimensions=4)
@@ -88,6 +103,21 @@ def test_vector_tables_use_actual_embedding_width(tmp_path):
         assert "use 3 dimensions" in str(exc)
     else:
         raise AssertionError("Changing embedding width must be explicit")
+
+
+def test_initialize_database_restores_missing_entity_vector_table(tmp_path):
+    database_path = tmp_path / "memory.db"
+    initialize_database(database_path, vector_dimensions=3)
+    with database_connection(database_path) as connection:
+        connection.execute("DROP TABLE entity_vec")
+
+    initialize_database(database_path)
+
+    with database_connection(database_path) as connection:
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'entity_vec'"
+        ).fetchone()
+    assert table is not None
 
 
 def test_hash_observations_rebuild_aggregate_and_cascade_with_document(tmp_path):
@@ -173,7 +203,7 @@ def test_schema_v2_database_migrates_to_v3(tmp_path):
             row["name"]
             for row in connection.execute("PRAGMA table_info(document)").fetchall()
         }
-    assert [row["version"] for row in versions] == [1, 2, 3]
+    assert [row["version"] for row in versions] == [1, 2, 3, 4]
     assert observation_table is not None
     assert "form_type" in document_columns
 
@@ -183,6 +213,8 @@ def test_schema_v1_database_runs_both_wave1_migrations(tmp_path):
     initialize_database(database_path)
     with database_connection(database_path) as connection:
         connection.execute("DROP TABLE paragraph_hash_observation")
+        connection.execute("DROP TABLE reconciliation_review")
+        connection.execute("DROP TABLE reconciliation_cache")
         connection.execute("ALTER TABLE document DROP COLUMN form_type")
         connection.execute("DELETE FROM schema_migrations WHERE version >= 2")
 
@@ -201,6 +233,6 @@ def test_schema_v1_database_runs_both_wave1_migrations(tmp_path):
             WHERE type = 'table' AND name = 'paragraph_hash_observation'
             """
         ).fetchone()
-    assert [row["version"] for row in versions] == [1, 2, 3]
+    assert [row["version"] for row in versions] == [1, 2, 3, 4]
     assert observation_table is not None
     assert "form_type" in document_columns

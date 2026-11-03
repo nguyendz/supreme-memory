@@ -123,7 +123,7 @@ def build_chunks(
     return chunks
 
 
-def _pack_vector(vector: Sequence[float]) -> sqlite3.Binary:
+def pack_vector(vector: Sequence[float]) -> sqlite3.Binary:
     return sqlite3.Binary(struct.pack(f"<{len(vector)}f", *vector))
 
 
@@ -159,7 +159,7 @@ def create_embeddings(
         dimensions = result.dimensions
         initialize_database(database_path, vector_dimensions=dimensions)
         embeddings.update(
-            (chunk.id, _pack_vector(vector))
+            (chunk.id, pack_vector(vector))
             for chunk, vector in zip(batch, result.vectors, strict=True)
         )
     return embeddings
@@ -312,7 +312,7 @@ def search_vectors(
     )
     where_clause = " AND ".join(filters) if filters else "1 = 1"
     candidate_limit = min(vector_count, max(limit * 4, limit))
-    packed_query = _pack_vector(query_vector)
+    packed_query = pack_vector(query_vector)
 
     while True:
         candidates = connection.execute(

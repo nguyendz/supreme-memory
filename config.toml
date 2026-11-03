@@ -4,7 +4,7 @@ database = "var/memory.db"
 
 [ollama]
 host = "http://localhost:11434"
-model = "qwen3.5:9b"
+model = "gemma4"
 embedding_model = "qwen3-embedding"
 num_ctx = 32768
 num_predict = 1024

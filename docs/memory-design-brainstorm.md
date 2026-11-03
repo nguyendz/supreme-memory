@@ -174,6 +174,22 @@ Ask the LLM to output **atomic, self-contained facts** in a fixed schema (see §
 - Every fact must include a short **evidence quote** from the document. It is used for the leakage check (§3.0) and for citations.
 - **Attribute vocabulary across 2,000 tickers.** Pass the LLM the existing vocabulary: generic attributes plus those used for this ticker or sector (`cash_balance`, `revenue`, `production_volume`, `resource_estimate`, `guidance_*` …). The LLM either reuses one or **proposes a new one**, which goes into a registry. A periodic job merges near-duplicate attributes. This avoids designing a full schema up front while still allowing facts to be matched by key.
 
+#### Family-specific slot templates (proposal)
+
+Sell-side equity research provides a useful analogy, not a claim about a universal bank procedure: analysts maintain company-specific forecast models, update them with reported results and guidance, then review the narrative for changes outside the model's existing line items. Public CFA Institute material describes structured three-statement models, operating assumptions, revenue/cost/working-capital and debt/equity schedules, scenario analysis, and model auditability ([financial modeling](https://www.cfainstitute.org/programs/cfa-program/candidate-resources/practical-skills-modules/financial-modelling); [analyst skills](https://www.cfainstitute.org/programs/cfa-program/candidate-resources/practical-skills-modules/analyst-skills)). A document extractor can borrow the repeatable coverage idea without trying to recreate an analyst's forecast model.
+
+The current [generic extraction prompt](../prompts/extract.md) establishes common evidence and no-invention rules. Add coarse document-family guidance on top of it rather than creating a unique prompt for every document. Full documents currently use that generic prompt; specialist prompts are mapped to supported forms in the [extractor](../src/agent_memory/pipeline/extract.py).
+
+For a quarterly activities and cash-flow report, a checklist could include production and sales, realized prices or revenue, unit costs, operating/investing/financing cash flows, closing cash, debt and funding, capex, guidance, and material project milestones. Where useful, add company- or sector-specific KPIs. For each slot, request:
+
+- A status: `found`, `not_reported`, `not_applicable`, or `ambiguous`.
+- If found: the value, units, period/as-of date, exact evidence quote, and source segment ID.
+- A distinction between an explicitly reported zero and a value that is absent.
+
+Only populated, evidence-backed slots become candidate facts; empty slots are coverage metadata, not facts. Do not mark a slot `not_reported` while processing an individual segment—decide that only after the whole document has been scanned. After the slot pass, run an open-ended pass for material facts that do not fit the checklist, then deduplicate and reconcile the results.
+
+Treat this as a proposal to evaluate, not an approved extractor change. Compare it with the generic prompt on manually labelled quarterlies, measuring expected-slot recall, quote pass rate, false positives, duplicate facts, token use, and latency. This checks that improved coverage does not come at the cost of invented or repetitive candidates.
+
 ### 3.5 Importance tiers (how "trivial" gets decided)
 
 Combine rules with an LLM score from 0 to 1. Store a tier label rather than deleting anything.

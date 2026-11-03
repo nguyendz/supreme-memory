@@ -239,8 +239,8 @@ def test_baseline_accepts_an_explicit_abstention_without_citations(tmp_path):
     client = FakeBaselineClient(
         citation_document=None,
         answer_text=(
-            "The provided source chunks do not contain enough information "
-            "to answer this question."
+            "The provided source chunks do not specify the mine life or "
+            "reserve share."
         ),
     )
     build_baseline_index(source_path, baseline_path, client)

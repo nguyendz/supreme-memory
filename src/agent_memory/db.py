@@ -12,7 +12,7 @@ from typing import Iterator
 import sqlite_vec
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA_SQL = """
 CREATE TABLE document (
@@ -208,6 +208,35 @@ _MIGRATION_3_SQL = """
 ALTER TABLE document ADD COLUMN form_type TEXT;
 """
 
+_MIGRATION_4_SQL = """
+CREATE TABLE reconciliation_cache (
+    step TEXT NOT NULL CHECK (step IN ('entity_resolution', 'narrative_dedup')),
+    input_hash TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    output_json TEXT NOT NULL,
+    raw_content TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (step, input_hash, model, prompt_version)
+);
+
+CREATE TABLE reconciliation_review (
+    id TEXT PRIMARY KEY,
+    doc_id TEXT NOT NULL REFERENCES document(id) ON DELETE CASCADE,
+    candidate_hash TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    candidate_json TEXT NOT NULL,
+    matches_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'resolved', 'ignored')),
+    created_at TEXT NOT NULL,
+    UNIQUE (doc_id, candidate_hash)
+);
+
+CREATE INDEX reconciliation_review_status_idx
+    ON reconciliation_review (status, doc_id);
+"""
+
 
 def connect_database(path: Path) -> sqlite3.Connection:
     """Open a configured SQLite connection."""
@@ -262,6 +291,7 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         (1, _SCHEMA_SQL),
         (2, _MIGRATION_2_SQL),
         (3, _MIGRATION_3_SQL),
+        (4, _MIGRATION_4_SQL),
     )
     for version, migration_sql in migrations:
         if version in applied_versions:
@@ -315,21 +345,25 @@ def ensure_vector_tables(connection: sqlite3.Connection, dimensions: int) -> Non
             f"Database vectors use {existing['dimensions']} dimensions, "
             f"not {dimensions}; create a new database to change embedding models"
         )
-    if existing is not None:
-        return
-
-    connection.execute(
-        "CREATE VIRTUAL TABLE chunk_vec USING vec0("
-        f"embedding float[{dimensions}], +chunk_id TEXT)"
+    vector_tables = (
+        ("chunk_vec", "chunk_id"),
+        ("fact_vec", "fact_id"),
+        ("entity_vec", "entity_id"),
     )
-    connection.execute(
-        "CREATE VIRTUAL TABLE fact_vec USING vec0("
-        f"embedding float[{dimensions}], +fact_id TEXT)"
-    )
-    connection.execute(
-        "INSERT INTO vector_metadata(name, dimensions) VALUES ('default', ?)",
-        (dimensions,),
-    )
+    for table_name, id_column in vector_tables:
+        table_exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = ?", (table_name,)
+        ).fetchone()
+        if table_exists is None:
+            connection.execute(
+                f"CREATE VIRTUAL TABLE {table_name} USING vec0("
+                f"embedding float[{dimensions}], +{id_column} TEXT)"
+            )
+    if existing is None:
+        connection.execute(
+            "INSERT INTO vector_metadata(name, dimensions) VALUES ('default', ?)",
+            (dimensions,),
+        )
 
 
 def initialize_database(
@@ -343,6 +377,12 @@ def initialize_database(
         _apply_migrations(connection)
         if vector_dimensions is not None:
             ensure_vector_tables(connection, vector_dimensions)
+        else:
+            vector_metadata = connection.execute(
+                "SELECT dimensions FROM vector_metadata WHERE name = 'default'"
+            ).fetchone()
+            if vector_metadata is not None:
+                ensure_vector_tables(connection, int(vector_metadata["dimensions"]))
         connection.commit()
     finally:
         if connection.in_transaction:
