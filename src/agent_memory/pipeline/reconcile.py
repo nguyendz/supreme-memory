@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import sqlite3
+import tempfile
 import time
 import unicodedata
 from dataclasses import dataclass, field, replace
@@ -18,7 +20,11 @@ import httpx
 import ollama
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent_memory.db import database_connection, initialize_database
+from agent_memory.db import (
+    connect_database,
+    database_connection,
+    initialize_database,
+)
 from agent_memory.llm import LLMClient
 from agent_memory.pipeline.chunks import pack_vector
 from agent_memory.pipeline.extract import (
@@ -30,12 +36,13 @@ from agent_memory.pipeline.extract import (
     _source_hash,
 )
 from agent_memory.pipeline.extract import normalize_form_family
-from agent_memory.pipeline.quotecheck import check_quote
+from agent_memory.pipeline.quotecheck import check_quote, normalize_quote_text
 from agent_memory.pipeline.resolve import (
     CachedDecision,
     ResolvedAttribute,
     ResolvedEntity,
     cached_structured_decision,
+    normalize_attribute_name,
     resolve_attribute,
     resolve_entity,
 )
@@ -44,6 +51,10 @@ from agent_memory.query.pit import current_facts_at
 
 APPROVED_EXTRACTION_MODELS = frozenset({"gemma4", "gemma4:latest", "qwen3.5:9b"})
 NARRATIVE_CANDIDATE_LIMIT = 5
+PILOT_DOCUMENT_ID = (
+    "20261013-2139-Quarterly-Activities-and-Cashflow-Report-6A1349068"
+)
+PILOT_KNOWLEDGE_DATE = date(2026, 10, 15)
 _PROMPT_ROOT = Path(__file__).resolve().parents[3] / "prompts"
 
 
@@ -67,6 +78,16 @@ class ReconciliationPreflight:
     quote_rejected: int
     t0_candidates: int
     recovery_capped: int
+
+
+@dataclass(frozen=True)
+class PilotPreflight:
+    document_id: str
+    model: str
+    eligible: bool
+    prompt_version: str | None
+    matching_candidates: int
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -329,6 +350,311 @@ def _load_current_cache(
         str(cached_row["prompt_version"]),
         {segment.segment_id: segment.text for segment in segments},
     )
+
+
+def _pilot_candidate_matches(
+    candidate: CandidateFact,
+    source_segment: str,
+) -> bool:
+    attribute = normalize_attribute_name(candidate.attribute)
+    if candidate.tier == "T0" or attribute not in {
+        "cash_balance",
+        "cash_balance_as_of",
+        "cash_balance_at_30_september_2026",
+    }:
+        return False
+    quote_result = check_quote(candidate.quote, source_segment)
+    if not quote_result.passed:
+        return False
+
+    normalized_quote = normalize_quote_text(candidate.quote)
+    amount_in_quote = normalize_quote_text("A$200 million") in normalized_quote
+    date_in_quote = normalize_quote_text("30 September 2026") in normalized_quote
+    normalized_value = normalize_quote_text(candidate.value)
+    amount_in_value = normalize_quote_text("A$200 million") in normalized_value
+    unit = normalize_quote_text(candidate.unit or "")
+    numeric_value_matches = (
+        candidate.value_num is not None
+        and (
+            (
+                math.isclose(candidate.value_num, 200_000_000, rel_tol=1e-9)
+                and "aud" in unit
+            )
+            or (
+                math.isclose(candidate.value_num, 200, rel_tol=1e-9)
+                and "million" in unit
+                and "aud" in unit
+            )
+        )
+    )
+    date_matches = (
+        candidate.as_of == date(2026, 9, 30)
+        or "2026-q3" in (candidate.period or "").casefold()
+        or date_in_quote
+    )
+    return (
+        amount_in_quote
+        and date_matches
+        and (amount_in_value or numeric_value_matches)
+    )
+
+
+def preflight_pilot_reconciliation(
+    source_database_path: Path,
+    *,
+    document_id: str,
+    model: str,
+) -> PilotPreflight:
+    """Check that the selected cache can support gold question w0-01."""
+    if model not in APPROVED_EXTRACTION_MODELS:
+        raise ValueError(
+            f"Model is not approved for an extraction pilot: {model}"
+        )
+    if document_id != PILOT_DOCUMENT_ID:
+        raise ValueError(
+            f"The first pilot currently supports only gold source {PILOT_DOCUMENT_ID}"
+        )
+    source_path = source_database_path.expanduser().resolve()
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Source database not found: {source_path}")
+    with database_connection(source_path) as connection:
+        document = connection.execute(
+            "SELECT ticker, published_at FROM document WHERE id = ?",
+            (document_id,),
+        ).fetchone()
+    if document is None:
+        return PilotPreflight(
+            document_id=document_id,
+            model=model,
+            eligible=False,
+            prompt_version=None,
+            matching_candidates=0,
+            reason="The gold source document is missing from the source database.",
+        )
+    if (
+        document["ticker"] != "CXO"
+        or date.fromisoformat(str(document["published_at"])[:10])
+        > PILOT_KNOWLEDGE_DATE
+    ):
+        return PilotPreflight(
+            document_id=document_id,
+            model=model,
+            eligible=False,
+            prompt_version=None,
+            matching_candidates=0,
+            reason="The pilot source does not match the gold ticker/knowledge date.",
+        )
+    try:
+        _require_empty_canonical_source(source_path)
+    except (ValueError, sqlite3.Error) as exc:
+        return PilotPreflight(
+            document_id=document_id,
+            model=model,
+            eligible=False,
+            prompt_version=None,
+            matching_candidates=0,
+            reason=f"Source is not a Wave 1/2 database with empty canonical tables: {exc}",
+        )
+    try:
+        loaded = _load_current_cache(source_path, document_id, model)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        return PilotPreflight(
+            document_id=document_id,
+            model=model,
+            eligible=False,
+            prompt_version=None,
+            matching_candidates=0,
+            reason=f"Cache preflight failed: {exc}",
+        )
+    if loaded is None:
+        return PilotPreflight(
+            document_id=document_id,
+            model=model,
+            eligible=False,
+            prompt_version=None,
+            matching_candidates=0,
+            reason="No extraction cache exists for the selected model.",
+        )
+
+    cached, prompt_version, source_map = loaded
+    if not source_map:
+        return PilotPreflight(
+            document_id=document_id,
+            model=model,
+            eligible=False,
+            prompt_version=prompt_version,
+            matching_candidates=0,
+            reason="The extraction cache is stale or does not match the current prompt.",
+        )
+    matching = sum(
+        _pilot_candidate_matches(
+            candidate,
+            source_map.get(candidate.segment_id, ""),
+        )
+        for candidate in cached.facts
+    )
+    if not matching:
+        return PilotPreflight(
+            document_id=document_id,
+            model=model,
+            eligible=False,
+            prompt_version=prompt_version,
+            matching_candidates=0,
+            reason=(
+                "No current quote-verified cash_balance candidate supports "
+                "A$200 million at 30 September 2026."
+            ),
+        )
+    return PilotPreflight(
+        document_id=document_id,
+        model=model,
+        eligible=True,
+        prompt_version=prompt_version,
+        matching_candidates=matching,
+    )
+
+
+def _backup_source_database(source_path: Path, destination_path: Path) -> None:
+    if source_path.resolve() == destination_path.resolve():
+        raise ValueError("Pilot database must be separate from the source database")
+    if destination_path.exists():
+        raise FileExistsError(
+            f"Pilot database already exists; choose a new path: {destination_path}"
+        )
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination_path.name}.",
+        suffix=".tmp",
+        dir=destination_path.parent,
+    )
+    os.close(file_descriptor)
+    temporary_path = Path(temporary_name)
+    source_connection: sqlite3.Connection | None = None
+    destination_connection: sqlite3.Connection | None = None
+    try:
+        source_connection = connect_database(source_path)
+        destination_connection = connect_database(temporary_path)
+        source_connection.backup(destination_connection)
+        destination_connection.commit()
+        destination_connection.close()
+        destination_connection = None
+        if destination_path.exists():
+            raise FileExistsError(
+                f"Pilot database appeared during copy: {destination_path}"
+            )
+        temporary_path.rename(destination_path)
+    finally:
+        if destination_connection is not None:
+            destination_connection.close()
+        if source_connection is not None:
+            source_connection.close()
+        if temporary_path.exists():
+            temporary_path.unlink()
+
+
+def _require_empty_canonical_source(database_path: Path) -> None:
+    with database_connection(database_path) as connection:
+        counts = {
+            table: int(
+                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            )
+            for table in ("entity", "attribute", "fact", "fact_source")
+        }
+    populated = {table: count for table, count in counts.items() if count}
+    if populated:
+        raise ValueError(
+            "Pilot source database must have empty canonical tables; "
+            f"found rows: {populated}"
+        )
+
+
+def run_pilot_reconciliation(
+    source_database_path: Path,
+    pilot_database_path: Path,
+    client: LLMClient,
+    *,
+    document_id: str,
+    model: str,
+) -> ReconciliationSummary:
+    """Back up a source DB and reconcile exactly one gold-backed pilot document."""
+    source_path = source_database_path.expanduser().resolve()
+    pilot_path = pilot_database_path.expanduser().resolve()
+    preflight = preflight_pilot_reconciliation(
+        source_path,
+        document_id=document_id,
+        model=model,
+    )
+    if not preflight.eligible:
+        raise ValueError(preflight.reason or "Pilot cache is not eligible")
+    _require_empty_canonical_source(source_path)
+    _backup_source_database(source_path, pilot_path)
+    initialize_database(pilot_path)
+
+    loaded = _load_current_cache(pilot_path, document_id, model)
+    if loaded is None:
+        raise RuntimeError("Pilot DB copy lost the validated extraction cache")
+    cached, prompt_version, source_map = loaded
+    if not source_map:
+        raise RuntimeError("Pilot DB copy has a stale extraction cache")
+    with database_connection(pilot_path) as connection:
+        document = connection.execute(
+            "SELECT ticker, published_at FROM document WHERE id = ?",
+            (document_id,),
+        ).fetchone()
+    if document is None:
+        raise RuntimeError("Pilot DB copy lost the selected source document")
+
+    call_snapshot = _llm_call_snapshot(pilot_path)
+    plan = _plan_document(
+        pilot_path,
+        client,
+        document_id=document_id,
+        ticker=str(document["ticker"]),
+        published_at=str(document["published_at"]),
+        prompt_version=prompt_version,
+        cached=cached,
+        source_map=source_map,
+        model=model,
+    )
+    _mark_same_time_key_conflicts([plan])
+    _attach_new_fact_embeddings(pilot_path, client, plan)
+    _persist_plan(pilot_path, plan)
+
+    summary = ReconciliationSummary(
+        model=model,
+        documents=1,
+        processed=1,
+        source_candidates=plan.source_candidates,
+        quote_rejected=plan.quote_rejected,
+        ignored_t0=plan.ignored_t0,
+        duplicate_candidates=plan.duplicate_candidates,
+        unresolved=len(plan.reviews),
+        decision_cache_hits=plan.decision_cache_hits,
+    )
+    for item in plan.facts:
+        if item.action == "ADD":
+            summary.added += 1
+        elif item.action == "CONFIRM":
+            summary.confirmed += 1
+        else:
+            summary.superseded += 1
+    summary.document_results.append(
+        DocumentReconciliationResult(
+            document_id=document_id,
+            source_candidates=plan.source_candidates,
+            quote_rejected=plan.quote_rejected,
+            ignored_t0=plan.ignored_t0,
+            duplicate_candidates=plan.duplicate_candidates,
+            added=summary.added,
+            confirmed=summary.confirmed,
+            superseded=summary.superseded,
+            unresolved=summary.unresolved,
+        )
+    )
+    summary.llm_calls, summary.prompt_tokens, summary.output_tokens = (
+        _llm_call_totals(pilot_path, call_snapshot)
+    )
+    return summary
 
 
 def preflight_reconciliation(

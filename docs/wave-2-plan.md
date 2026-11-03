@@ -14,15 +14,15 @@ At the end of Wave 2:
 - A local browser UI compares cached model outputs and preserves user review decisions separately.
 - `am ask --baseline --as-of ...` retrieves only chunks published on or before `knowledge_date` and returns citations.
 - `am eval --baseline` produces a baseline report for all eligible gold questions.
-- The five-quarterly T1 review file is ready for user review.
+- T1 coverage diagnostics are available for engineering follow-up; user data-quality feedback is collected from sourced query answers, not raw candidate rows.
 
-**Gate 2:** At least 98% of extraction responses are valid after one retry; at least 90% of non-T0 candidate facts pass quote checking; the user finds T1 coverage/tier labels acceptable on five quarterlies; the default local model is selected; and baseline evaluation numbers are recorded with citation/leakage checks passing.
+**Gate 2 (full-slice quality/promotion):** At least 98% of extraction responses are valid after one retry; at least 90% of non-T0 candidate facts pass quote checking; the extraction model is selected; and baseline evaluation numbers are recorded with citation/leakage checks passing. Judge T1 completeness/tiering from source-backed query results in Wave 4, not by asking the user to inspect raw candidate files. A one-document isolated query pilot may run before Gate 2 closes; it does not authorize bulk promotion.
 
 ## Implementation status
 
 The Wave 2 code paths and tests are implemented. The user accepted the Wave 1 triage, boilerplate, and quarterly cross-reference reviews on 2026-11-02. Qwen extraction completed with current caches for all 108 supported documents; 16 forms are explicitly unsupported and no candidates remain unprocessed. Recovery extraction preserved full raw responses while recording 67 lower-priority facts capped from dense segments. Logged Qwen extraction/comparison calls were schema-valid on the first attempt or one retry in 664/750 cases (88.5%), below the 98% Gate 2 target; the Qwen non-T0 quote-pass rate is 88.9% (3,854/4,333), below the 90% target.
 
-The user selected Gemma 4 as the provisional default and Qwen 3.5 as a manual alternate, then requested a full-slice Gemma refresh. Gemma extraction completed with caches for all 108 supported documents and no failures. Its full-slice non-T0 quote-pass rate is 82.4% (1,136/1,379). The Gemma T1 review has 28 candidates versus 142 in the preserved Qwen review; on the January, April, and July 2025 quarterlies Gemma produced one T1 candidate each. Keep Gemma provisional pending user review of `var/eval/t1-review.csv` and `var/eval/t1-review-qwen.csv`. The initial Qwen spot-check of the first eight January 2025 T1 rows found source-backed quotes, a rounded/precise duplicate cash balance, a stockpile fact split across two attributes, and capital-structure items worth considering for T1 versus T2.
+The user selected Gemma 4 as the provisional default and Qwen 3.5 as a manual alternate, then requested a full-slice Gemma refresh. Gemma extraction completed with caches for all 108 supported documents and no failures. Its full-slice non-T0 quote-pass rate is 82.4% (1,136/1,379). The Gemma T1 review has 28 candidates versus 142 in the preserved Qwen review; on the January, April, and July 2025 quarterlies Gemma produced one T1 candidate each. Keep Gemma provisional. Treat `var/eval/t1-review.csv` and `var/eval/t1-review-qwen.csv` as engineering diagnostics, not user homework. The initial Qwen spot-check of the first eight January 2025 T1 rows found source-backed quotes, a rounded/precise duplicate cash balance, a stockpile fact split across two attributes, and capital-structure items worth considering for T1 versus T2.
 
 The isolated baseline index contains 19,484/19,484 chunks at 4,096 dimensions. The Qwen baseline evaluation completed 24 in-corpus questions, deferred only `w0-09`, and recorded 12/24 judge-agreed answers (50.0%), zero failed runs, zero out-of-date citations, and zero invalid quotes; see ignored `var/eval/baseline.md`. The Gemma baseline evaluation recorded 13/24 judge-agreed answers (54.2%), one citation-validation failure, and zero out-of-date citations; see ignored `var/eval/baseline-gemma.md`. The fixed extraction-model comparison completed all 30 runs: aggregate non-T0 quote pass was 87.8% for `qwen3.5:9b`, 90.9% for `gemma4`, and 87.1% for `nimble`; see ignored `var/eval/models.md`. `config.toml` uses provisional `gemma4`, with Qwen available via `AM_LLM_MODEL=qwen3.5:9b`. Gate 2 remains open pending T1 review and quote/schema quality; the evaluation harness counts a source as in-corpus only when it has searchable chunks, not merely a catalog row.
 
@@ -204,16 +204,16 @@ The five fixed `full` inputs are `20261013-2139-Quarterly-Activities-and-Cashflo
 - [x] Every cited quote is present in its source chunk and the answer context.
 - [x] A baseline report is produced with answer-accuracy, citation, quote, token, and category metrics.
 
-### 2.7 — Human review of T1 candidates
+### 2.7 — T1 coverage diagnostics (not user review)
 
 **Implementation**
 - Export candidate facts for these five quarterlies to `var/eval/t1-review.csv`: `20250122-2145-Quarterly-Activities-and-Cashflow-Report-2A1574556`, `20250428-2310-Quarterly-Activities-and-Cashflow-Report-2A1593142`, `20250729-2314-Quarterly-Activities-and-Cashflow-Report-2A1610591`, `20251012-2205-Quarterly-Activities-and-Cashflow-Report-2A1628714`, and `20261013-2139-Quarterly-Activities-and-Cashflow-Report-6A1349068`.
-- Include the candidate text, tier, entity/attribute, as-of/period, quote, and source segment. Review completeness and whether T1/T2/T3 labels fit the stated policy.
-- Feed user corrections into `prompts/extract.md` before closing Gate 2; do not hand-edit model outputs in the cache.
+- Include the candidate text, tier, entity/attribute, as-of/period, quote, and source segment for developer diagnosis.
+- Do not ask the user to inspect or hand-edit these rows. Use answer-level query results and their citations for user feedback; keep extraction caches immutable.
 
 **Acceptance**
 - [x] The review file has all T1 candidates from the five fixed quarterlies.
-- [ ] User review records missing/incorrect facts and tier corrections.
+- [x] The review files are available as internal diagnostics; user-level quality review is deferred to the Wave 4 query pilot.
 
 ## Execution order
 
@@ -226,8 +226,8 @@ The five fixed `full` inputs are `20261013-2139-Quarterly-Activities-and-Cashflo
 7. Run the 30 model/document comparison; record quality and latency before selecting a default.
 8. In parallel, build the all-chunk baseline database and `am ask --baseline`.
 9. Run `am eval --baseline` on the 24 in-slice gold questions and produce the report.
-10. Export the five-quarterly T1 review file and wait for user review.
-11. Close Gate 2 only after JSON, quote, baseline, model, and user-review criteria pass.
+10. Export the five-quarterly T1 diagnostic files; use them internally to investigate failures.
+11. Keep Gate 2 open until JSON, quote, baseline, model, and full-slice promotion criteria pass. Collect user feedback through the isolated Wave 4 query pilot, not raw candidate review.
 
 ## Implemented command interfaces
 

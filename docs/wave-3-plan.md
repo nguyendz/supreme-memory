@@ -6,6 +6,9 @@ source-linked facts; resolves entities and attributes; and provides
 point-in-time state and timeline helpers. It does not add the Wave 4 answer
 agent or change the extraction prompt.
 
+The immediate, user-facing continuation from Waves 0–3 is tracked in the
+[pre-Wave-4 gap plan](./pre-wave-4-gap-plan.md).
+
 ## Outcome and gate
 
 At the end of Wave 3:
@@ -21,12 +24,11 @@ At the end of Wave 3:
 - Reconciliation can be replayed from extraction and decision caches without
   rerunning extraction, and replay produces the same logical memory state.
 
-**Gate 3:** On the September 2026 quarterly, actions broadly match the worked
-example in [the MVP plan](./mvp-plan.md) (approximately 3–5 `ADD` and 10
-`CONFIRM` actions); the cash and `shares_on_issue` timelines are correct; the
-quarterly `ADD` ratio is at most 50%; point-in-time tests show no future
-leakage; and a full dev-slice replay is logically identical to its first run.
-The user reviews the worked example before the gate closes.
+**Gate 3 (mechanics):** Automated tests cover the worked example's
+`ADD`/`CONFIRM`/`SUPERSEDE` behavior, cash and `shares_on_issue` timelines,
+point-in-time boundaries, and deterministic replay. The first user-facing
+validation is answer-level in the Wave 4 pilot below; the user is not asked to
+inspect raw T1 candidate rows.
 
 ## Implementation status (2026-11-03)
 
@@ -60,15 +62,24 @@ uv run am reconcile --database var/wave3/dev.db --model gemma4 --ticker CXO --re
 cached resolver/judge decisions. It does not rerun fact extraction. Uncertain
 decisions are retained in `reconciliation_review`; inspect them before Gate 3.
 
+## Wave 4 handoff
+
+Wave 3 supplies the canonical facts and PIT helpers. The one-query pilot and
+answer/citation path belong to Wave 4; see
+[wave-4-pilot-plan.md](./wave-4-pilot-plan.md). The pre-Wave-4 document covers
+only the isolated one-document reconciliation prerequisite. This separation
+keeps pilot safety work from duplicating the query implementation plan.
+
 ## Current state and entry conditions
 
 - Wave 2 stores candidate facts and raw model output in
   `extraction_cache`; it does not populate `entity`, `attribute`, `fact`, or
   `fact_source`.
-- Wave 2 Gate 2 is **still open**. The user has not completed the T1 review;
-  Qwen's full-slice non-T0 quote pass is 88.9% and Gemma's is 82.4%, both below
-  the 90% target. Logged Qwen calls were schema-valid on the first attempt or
-  one retry in 88.5% of grouped calls, below the 98% target.
+- Wave 2 Gate 2 is **still open**. Qwen's full-slice non-T0 quote pass is 88.9%
+  and Gemma's is 82.4%, both below the 90% target. Logged Qwen calls were
+  schema-valid on the first attempt or one retry in 88.5% of grouped calls,
+  below the 98% target. These remain broad-quality concerns, not a reason to
+  ask the user to inspect raw candidate rows before the isolated pilot.
 - Gemma 4 remains provisional and Qwen 3.5 remains a manual alternate. The
   local `nimble` model is a decision/classification model with a one-choice
   output instruction; its earlier extraction comparison is not a comparable
@@ -80,9 +91,9 @@ decisions are retained in `reconciliation_review`; inspect them before Gate 3.
   `fact_source`, and `fact_vec`. Review their constraints and migration history
   before adding schema. Do not duplicate existing tables.
 - Pre-gate implementation can cover schema checks, synthetic fixtures,
-  resolver tests, and PIT helpers. Do not bulk-promote unreviewed candidates
-  into canonical fact tables until Gate 2 is explicitly closed and the source
-  model is selected.
+  resolver tests, and PIT helpers. A one-document exploratory pilot may write
+  to its disposable database before Gate 2 closes; do not bulk-promote
+  unreviewed candidates or change the default database/model.
 - The family-specific, slot-guided extraction idea in the
   [design brainstorm](./memory-design-brainstorm.md) remains a proposal. Keep
   it separate from Wave 3 so reconciliation uses a frozen extraction cache.
@@ -282,17 +293,22 @@ not in canonical facts.
 - Command guards reject an unapproved model, stale cache, invalid date range,
   or a request to promote while the Gate 2 prerequisite is open.
 
-## Test and review sequence
+## Wave 4 handoff checks
 
-1. Implement schema/resolver/PIT logic against synthetic databases; no
-   production-cache promotion.
-2. Close Gate 2: complete the user's T1 review, select the extraction model,
-   and decide how to address the below-target JSON/quote rates.
-3. Clone the isolated database and preflight the selected model's caches.
-4. Reconcile one reviewed quarterly and inspect every action and timeline.
-5. Add the other two quarterlies for narrative-dedup evaluation.
-6. Run a full dev-slice replay, compare logical tables, and present Gate 3
-   metrics and the worked example for approval.
+1. [x] Keep schema, resolver, reconciliation, PIT, replay, and failure behavior
+   covered by synthetic tests; the full suite passes.
+2. [x] Keep `var/wave1/dev.db` unchanged; read-only preflight verifies cache
+   freshness and quote coverage.
+3. [x] Implement and test the bounded pilot-copy guard from the
+   [pre-Wave-4 readiness plan](./pre-wave-4-gap-plan.md). It writes only the
+   selected document to a new disposable DB and does not close Gate 2.
+4. [x] Assert in tests that the pilot DB contains only the intended pilot
+   reconciliation result. This is a structural check, not a request for the
+   user to inspect internal fact rows.
+5. Query planning, answer generation, citation rendering, and the user's
+   answer-level “taste test” belong to the
+   [Wave 4 plan](./wave-4-plan.md); see its
+   [4.0 pilot details](./wave-4-pilot-plan.md).
 
 Use the repository test command `uv run python -m pytest -q`; keep tests
 focused during implementation, then run the full suite before Gate 3.

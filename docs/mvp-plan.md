@@ -249,13 +249,13 @@ Detailed execution checklist: see [wave-2-plan.md](./wave-2-plan.md).
 | 2.4 | 🛠 | Compare eligible generation models on 10 fixed docs. The historical 30-run comparison included `nimble`, but local metadata identifies it as decision-only; do not use its score to select an extraction model | `scripts/compare_models.py` | Side-by-side report in `var/eval/models.md`; default selected only from eligible generation models |
 | 2.5 | 🔎 | Baseline RAG: top-k chunks (FTS + vector) with `published_at <= knowledge_date`, answer prompt with citations | `query/baseline_rag.py` | `am ask --baseline --as-of …` answers with citations |
 | 2.6 | 🔎 | Eval harness: load gold set, run answering, LLM-judge accuracy, citation validity (date ≤ T, quote exists), context tokens, write report | `eval/run_eval.py` | `am eval --baseline` produces **baseline numbers** |
-| 2.7 | 👤 | Hand-review T1 facts for 5 quarterlies (completeness and tier labels) | review notes | Missing or incorrect items fed back into the prompt |
+| 2.7 | 🔎 | Export T1 coverage diagnostics for five quarterlies; defer user judgment to cited query answers in Wave 4 | `var/eval/t1-review*.csv` | Internal diagnostics are available; no raw-row review is required from the user |
 
-**Gate 2:** JSON ≥ 98%, quote pass ≥ 90%, T1 completeness acceptable to you, model chosen, baseline numbers recorded.
+**Gate 2 (full-slice quality/promotion):** JSON ≥ 98%, quote pass ≥ 90%, model chosen, and baseline numbers recorded. T1 completeness and tier quality are judged from source-backed query results, not raw candidate rows. An isolated one-document query pilot may run before Gate 2 closes; it does not close the gate or authorize bulk promotion.
 
 ### Wave 3 — Memory: resolve, reconcile, point-in-time views
 
-Depends on Wave 2 (it works from `extraction_cache`, so it doesn't need to call the LLM again for extraction). 3.4 needs only the schema and can be built alongside 3.1–3.3.
+Depends on Wave 2 (it works from `extraction_cache`, so it doesn't need to call the LLM again for extraction). 3.4 needs only the schema and can be built alongside 3.1–3.3. Gate 2 remains the full-slice promotion gate; the isolated first-query pilot described in Wave 4 may proceed before it closes.
 
 Detailed execution checklist: see [wave-3-plan.md](./wave-3-plan.md).
 
@@ -269,15 +269,29 @@ Detailed execution checklist: see [wave-3-plan.md](./wave-3-plan.md).
 
 **Gate 3:**
 - On the Sep-2026 quarterly, the actions match the brainstorm §5 worked example (≈ 3–5 ADD, ≈ 10 CONFIRM).
-- The cash and `shares_on_issue` timelines look right to you.
+- PIT and replay checks pass for cash and `shares_on_issue`.
 - The ADD ratio on quarterlies is ≤ 50%.
+- User-facing data-quality feedback is collected from sourced query answers, not by inspecting raw fact rows.
 
 ### Wave 4 — Memory-backed query
 
 Depends on Wave 3. Reuses the answer prompt and citation format from 2.5.
 
+Near-term gap plan: see [pre-wave-4-gap-plan.md](./pre-wave-4-gap-plan.md).
+A one-document disposable pilot may run before Gate 2 closes; it is an
+answer-level smoke test, not permission for bulk promotion or a Gate 4 pass.
+
+Before starting the Wave 4 query work, complete the isolated pilot prerequisites
+in [pre-wave-4-gap-plan.md](./pre-wave-4-gap-plan.md). The one-query pilot is
+Wave 4.0 work; its implementation checklist is
+[wave-4-pilot-plan.md](./wave-4-pilot-plan.md). The complete Wave 4 execution
+checklist is in [wave-4-plan.md](./wave-4-plan.md). The pilot may run before
+Gate 2 closes, but only on a disposable DB; it does not certify full-slice
+quality or pass Gate 4.
+
 | ID | Track | Item | Files | Done when |
 |---|---|---|---|---|
+| 4.0 | 🔎👤 | First memory-backed query pilot for `w0-01` using the Sep-2026 cash-balance disclosure | `query/retrieve.py`, `query/agent.py`, `cli.py` | One answer matches the gold answer, has a valid source quote, and is judged by the user at answer level |
 | 4.1 | 🔎 | Retrieval: intent routing (state / timeline / event / summary / chunk fallback), default tier filter (T1–T2, T3 only if asked), hybrid search, packing (one row per fact, earliest source, confirmed N times as of T) | `query/retrieve.py` | Packed context for 10 gold questions has no duplicate facts |
 | 4.2 | 🔎 | Agent loop with the §6 tools (`get_state`, `get_timeline`, `search_facts`, `get_summary`, `get_sources`, `open_document`), all taking `knowledge_date` | `query/agent.py` | Tool calls are logged. Answers cite docs ≤ T |
 | 4.3 | 🔎 | Summaries built at query time from PIT facts | `query/agent.py`, `prompts/summary.md` | The "summarise Sep-2026 quarter" question gives about 10 bullets, no boilerplate |

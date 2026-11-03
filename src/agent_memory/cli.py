@@ -6,7 +6,10 @@ import webbrowser
 from collections import Counter
 from datetime import date
 from pathlib import Path
+import sqlite3
 
+import httpx
+import ollama
 import typer
 from pydantic import BaseModel
 from rich.console import Console
@@ -22,7 +25,9 @@ from agent_memory.pipeline.review import export_t1_review
 from agent_memory.pipeline.reconcile import (
     APPROVED_EXTRACTION_MODELS,
     preflight_reconciliation,
+    preflight_pilot_reconciliation,
     run_reconciliation,
+    run_pilot_reconciliation,
 )
 from agent_memory.query.baseline_rag import answer_baseline, build_baseline_index
 from agent_memory.review_ui import generate_model_review_ui
@@ -57,7 +62,13 @@ def _validate_wave2_runtime(
             require_chat_model=require_chat_model,
             require_embedding_model=require_embedding_model,
         )
-    except ValueError as exc:
+    except (
+        ValueError,
+        OSError,
+        sqlite3.Error,
+        httpx.HTTPError,
+        ollama.ResponseError,
+    ) as exc:
         raise typer.BadParameter(str(exc)) from exc
 
 
@@ -311,6 +322,7 @@ def reconcile(
     database: Path = typer.Option(
         ...,
         "--database",
+        "--source-db",
         exists=True,
         dir_okay=False,
         help="Isolated source database with extraction caches.",
@@ -328,6 +340,20 @@ def reconcile(
     limit: int | None = typer.Option(None, min=1, help="Limit sorted documents."),
     replay: bool = typer.Option(
         False, "--replay", help="Clear and rebuild all canonical memory for --ticker."
+    ),
+    pilot: bool = typer.Option(
+        False,
+        "--pilot",
+        help="Reconcile one gold-backed document into a new disposable pilot DB.",
+    ),
+    pilot_database: Path | None = typer.Option(
+        None,
+        "--pilot-db",
+        dir_okay=False,
+        help="New output database path under var/wave3 for --pilot.",
+    ),
+    document_id: str | None = typer.Option(
+        None, "--document-id", help="One explicit source document for --pilot."
     ),
     preflight: bool = typer.Option(
         False, "--preflight", help="Validate caches and quotes without writing facts."
@@ -350,6 +376,82 @@ def reconcile(
     try:
         start = _parse_cli_date(from_date, "--from")
         end = _parse_cli_date(to_date, "--to")
+        if pilot:
+            if (
+                ticker is not None
+                or start is not None
+                or end is not None
+                or limit is not None
+                or replay
+                or confirm_wave2_gate
+            ):
+                raise typer.BadParameter(
+                    "--pilot requires only --document-id and cannot be combined "
+                    "with ticker/date/limit/replay/full-gate options"
+                )
+            if document_id is None:
+                raise typer.BadParameter("--document-id is required with --pilot")
+            if database.expanduser().resolve() == settings.database_path.resolve():
+                raise typer.BadParameter(
+                    "The primary database cannot be used as a pilot source"
+                )
+            if preflight:
+                if pilot_database is not None:
+                    raise typer.BadParameter(
+                        "--pilot-db is used only when executing a pilot"
+                    )
+                result = preflight_pilot_reconciliation(
+                    database,
+                    document_id=document_id,
+                    model=selected_model,
+                )
+                console.print(
+                    f"Pilot preflight: {'ready' if result.eligible else 'blocked'}; "
+                    f"model: {result.model}; document: {result.document_id}; "
+                    f"matching candidates: {result.matching_candidates}"
+                )
+                if not result.eligible:
+                    console.print(f"[red]{result.reason}[/red]")
+                    raise typer.Exit(code=1)
+                console.print("[green]No database was changed.[/green]")
+                return
+            if pilot_database is None:
+                raise typer.BadParameter("--pilot-db is required to execute a pilot")
+            pilot_root = (settings.project_root / "var" / "wave3").resolve()
+            pilot_path = pilot_database.expanduser().resolve()
+            if not pilot_path.is_relative_to(pilot_root):
+                raise typer.BadParameter(
+                    f"--pilot-db must be under the disposable directory: {pilot_root}"
+                )
+            _validate_wave2_runtime(settings, require_chat_model=False)
+            pilot_client = LLMClient(settings, pilot_path)
+            summary = run_pilot_reconciliation(
+                database,
+                pilot_path,
+                pilot_client,
+                document_id=document_id,
+                model=selected_model,
+            )
+            console.print(
+                "[yellow]EXPLORATORY PILOT ONLY — Gate 2 remains open.[/yellow]"
+            )
+            console.print(
+                f"Pilot DB: {pilot_path}; document: {document_id}; "
+                f"model: {summary.model}; ADD {summary.added}, "
+                f"CONFIRM {summary.confirmed}, SUPERSEDE {summary.superseded}; "
+                f"quote rejected {summary.quote_rejected}; "
+                f"unresolved {summary.unresolved}"
+            )
+            console.print(
+                f"LLM calls: {summary.llm_calls}; prompt tokens: "
+                f"{summary.prompt_tokens}; output tokens: {summary.output_tokens}; "
+                f"elapsed: {summary.elapsed_seconds:.2f}s"
+            )
+            return
+        if pilot_database is not None or document_id is not None:
+            raise typer.BadParameter(
+                "--pilot-db and --document-id require --pilot"
+            )
         if preflight:
             if replay or confirm_wave2_gate:
                 raise typer.BadParameter(
