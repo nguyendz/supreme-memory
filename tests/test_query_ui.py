@@ -8,7 +8,7 @@ import pytest
 
 import agent_memory.query_ui as query_ui
 from agent_memory.config import AppConfig
-from agent_memory.query.agent import MemoryQueryResult
+from agent_memory.query.agent import MemoryCitationValidationError, MemoryQueryResult
 from agent_memory.query.retrieve import MemorySource
 
 
@@ -105,6 +105,7 @@ def test_query_ui_shows_answer_and_source_evidence(
             citations=(source,),
             retrieved_facts=(),
             used_chunk_fallback=False,
+            debug={"query_id": "query-1", "available_citation_ids": ["c1"]},
         )
 
     def fake_client_factory(settings, database_path):
@@ -121,6 +122,10 @@ def test_query_ui_shows_answer_and_source_evidence(
     assert 'id="as-of"' in page
     assert "textContent" in page
     assert ".innerHTML" not in page
+    assert "Query debug details" in page
+    assert 'makeElement("details", "card debug")' in page
+    assert "renderDebug(data.debug)" in page
+    assert "data.debug);" in page
 
     request_body = {
         "question": "What was CXO's cash balance?",
@@ -133,6 +138,7 @@ def test_query_ui_shows_answer_and_source_evidence(
 
     assert result["status"] == "answered"
     assert result["answer"] == "The cash balance was A$200 million."
+    assert result["debug"]["available_citation_ids"] == ["c1"]
     assert result["citations"] == [
         {
             "citation_id": "c1",
@@ -149,6 +155,60 @@ def test_query_ui_shows_answer_and_source_evidence(
     assert calls["knowledge_date"] == date(2026, 10, 15)
     assert calls["chunk_fallback"] is True
     assert calls["model"] == "gemma4"
+
+
+def test_query_ui_returns_debug_on_citation_validation_failure(
+    query_ui_server, monkeypatch
+):
+    debug = {
+        "query_id": "failed-query",
+        "available_citation_ids": ["c1"],
+        "answer_attempts": [
+            {
+                "raw_response": '{"answer":"<script>alert(1)</script>","citation_ids":[]}',
+                "validation_error": "a non-abstaining answer has no citations",
+            }
+        ],
+    }
+
+    def fake_answer(*args, **kwargs):
+        raise MemoryCitationValidationError(
+            "Memory answer failed citation validation after one correction: "
+            "a non-abstaining answer has no citations",
+            debug=debug,
+        )
+
+    monkeypatch.setattr(query_ui, "LLMClient", lambda *args: object())
+    monkeypatch.setattr(query_ui, "answer_memory", fake_answer)
+    with pytest.raises(HTTPError) as failure:
+        _post(
+            query_ui_server,
+            {"question": "Cash?", "ticker": "CXO", "as_of": "2026-10-15"},
+        )
+    assert failure.value.code == 422
+    payload = json.loads(failure.value.read())
+    assert "a non-abstaining answer has no citations" in payload["error"]
+    assert payload["debug"] == debug
+    assert "answer" not in payload
+
+
+def test_query_ui_keeps_regular_validation_errors_without_debug(
+    query_ui_server, monkeypatch
+):
+    def fake_answer(*args, **kwargs):
+        raise ValueError("Query planner selected an entity outside the allowed set")
+
+    monkeypatch.setattr(query_ui, "LLMClient", lambda *args: object())
+    monkeypatch.setattr(query_ui, "answer_memory", fake_answer)
+    with pytest.raises(HTTPError) as failure:
+        _post(
+            query_ui_server,
+            {"question": "Cash?", "ticker": "CXO", "as_of": "2026-10-15"},
+        )
+    assert failure.value.code == 422
+    assert json.loads(failure.value.read()) == {
+        "error": "Query planner selected an entity outside the allowed set"
+    }
 
 
 def test_query_ui_rejects_invalid_date_and_cross_origin_requests(query_ui_server):

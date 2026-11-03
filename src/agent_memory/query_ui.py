@@ -14,7 +14,11 @@ import ollama
 
 from agent_memory.config import AppConfig
 from agent_memory.llm import LLMClient
-from agent_memory.query.agent import MemoryQueryResult, answer_memory
+from agent_memory.query.agent import (
+    MemoryCitationValidationError,
+    MemoryQueryResult,
+    answer_memory,
+)
 from agent_memory.query.retrieve import ChunkEvidence, MemorySource
 
 
@@ -65,6 +69,9 @@ button:disabled { cursor: wait; opacity: .65; }
 .quote { margin: .65rem 0; padding: .7rem; border-left: 3px solid #97a8b4; background: #f7f9fa; white-space: pre-wrap; overflow-wrap: anywhere; }
 .source-path { margin: .5rem 0 0; color: #536574; font-size: .88rem; overflow-wrap: anywhere; }
 .error { padding: .9rem 1rem; border-left: 4px solid #9a2c20; color: #7d241b; }
+.debug { margin-top: 1rem; padding: 1rem; }
+.debug summary { cursor: pointer; font-weight: 600; }
+.debug pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 32rem; overflow: auto; }
 @media (max-width: 650px) {
   main { padding: .85rem; }
   .fields { grid-template-columns: 1fr; }
@@ -117,9 +124,22 @@ button:disabled { cursor: wait; opacity: .65; }
     return node;
   }
 
-  function renderError(message) {
+  function renderDebug(debug) {
+    if (!debug || !Object.keys(debug).length) return;
+    const panel = makeElement("details", "card debug");
+    panel.append(makeElement("summary", "", "Query debug details"));
+    panel.append(makeElement(
+      "p", "muted",
+      "Diagnostic model output is unvalidated, not an accepted answer. Details include the question, prompts and retrieved evidence."
+    ));
+    panel.append(makeElement("pre", "", JSON.stringify(debug, null, 2)));
+    results.append(panel);
+  }
+
+  function renderError(message, debug) {
     const error = makeElement("p", "card error", message);
     results.replaceChildren(error);
+    renderDebug(debug);
   }
 
   function renderResult(data) {
@@ -157,6 +177,7 @@ button:disabled { cursor: wait; opacity: .65; }
     }
     results.replaceChildren(...content);
     results.append(makeElement("p", "muted", `Query ID: ${data.query_id}`));
+    renderDebug(data.debug);
   }
 
   form.addEventListener("submit", async event => {
@@ -177,7 +198,11 @@ button:disabled { cursor: wait; opacity: .65; }
         body: JSON.stringify(payload)
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+      if (!response.ok) {
+        renderError(data.error || `Request failed (${response.status})`, data.debug);
+        status.textContent = "Query failed.";
+        return;
+      }
       renderResult(data);
       status.textContent = data.status === "no_evidence"
         ? "No verified evidence was available for that knowledge date."
@@ -257,6 +282,7 @@ def _result_payload(result: MemoryQueryResult) -> dict[str, object]:
         "status": "answered" if result.citations else "no_evidence",
         "used_chunk_fallback": result.used_chunk_fallback,
         "citations": [_citation_payload(item) for item in result.citations],
+        "debug": result.debug,
     }
 
 
@@ -379,6 +405,9 @@ def create_query_server(
                     model=model,
                     chunk_fallback=chunk_fallback,
                 )
+            except MemoryCitationValidationError as exc:
+                self._send_json(422, {"error": str(exc), "debug": exc.debug})
+                return
             except ValueError as exc:
                 self._send_error_json(422, str(exc))
                 return

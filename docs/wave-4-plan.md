@@ -52,6 +52,13 @@ Gate 2.
   optional chunk fallback, citation validation, and source inspection commands.
   The loopback-only `am ui` interface shows answers alongside their source
   quotes; synthetic tests cover these routes and the `am show` commands.
+  Expand **Query debug details** below a result or citation-validation error
+  to inspect the query plan, retrieved evidence, available citation IDs, and
+  each answer attempt's prompt, raw response, and validation error. Failed
+  model output is diagnostic only; it is never shown as an accepted answer.
+  These local UI diagnostics include the question and source text; review
+  them before sharing. They are returned with the request, not stored in the
+  retrieval-tool log.
 - The real `w0-01` query was rerun on the isolated pilot DB after schema
   migration 6. It answered A$200 million and displayed the quarterly's source
   quote and path. The `get_state` tool call was recorded with one result and

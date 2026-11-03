@@ -9,6 +9,7 @@ from agent_memory.db import database_connection, initialize_database
 from agent_memory.pipeline.chunks import pack_vector
 from agent_memory.query.agent import (
     MemoryAnswerResponse,
+    MemoryCitationValidationError,
     QueryPlan,
     answer_memory,
 )
@@ -164,6 +165,9 @@ def test_memory_answer_returns_gold_state_with_materialized_source(tmp_path):
     assert result.citations[0].quote == SOURCE
     assert result.citations[0].headline == "September quarterly"
     assert result.citations[0].source_path == "data/CXO/source.md"
+    assert result.debug["available_citation_ids"] == ["c1"]
+    assert result.debug["query_plan"]["intent"] == "state"
+    assert result.debug["answer_attempts"][0]["validation_error"] is None
     with database_connection(database_path) as connection:
         tool_call = connection.execute(
             "SELECT query_id, tool_name, result_count, status, args_json "
@@ -195,6 +199,8 @@ def test_memory_answer_abstains_when_no_fact_is_visible_by_knowledge_date(tmp_pa
     assert "could not find a verified memory fact" in result.answer
     assert result.citations == ()
     assert client.answer_calls == 0
+    assert result.debug["available_citation_ids"] == []
+    assert result.debug["answer_attempts"] == []
     with database_connection(database_path) as connection:
         tool_calls = connection.execute(
             "SELECT tool_name, result_count, status, elapsed_ms "
@@ -209,7 +215,22 @@ def test_memory_answer_abstains_when_no_fact_is_visible_by_knowledge_date(tmp_pa
     assert tool_calls[1]["elapsed_ms"] >= 0
 
 
-def test_memory_answer_retries_then_rejects_unknown_citation_ids(tmp_path):
+@pytest.mark.parametrize(
+    "answer_ids, errors",
+    [
+        (
+            [["invented"], ["still-invented"]],
+            ["unknown citation ID(s): invented", "unknown citation ID(s): still-invented"],
+        ),
+        (
+            [[], []],
+            ["a non-abstaining answer has no citations"] * 2,
+        ),
+    ],
+)
+def test_memory_answer_retries_then_rejects_invalid_citations(
+    tmp_path, answer_ids, errors
+):
     database_path = tmp_path / "pilot.db"
     _pilot_database(database_path)
     client = FakeClient(
@@ -219,10 +240,12 @@ def test_memory_answer_retries_then_rejects_unknown_citation_ids(tmp_path):
             attribute="cash_balance_as_of",
             subject_date=date(2026, 9, 30),
         ),
-        answer_ids=[["invented"], ["still-invented"]],
+        answer_ids=answer_ids,
     )
 
-    with pytest.raises(ValueError, match="failed citation validation"):
+    with pytest.raises(
+        MemoryCitationValidationError, match="failed citation validation"
+    ) as failure:
         answer_memory(
             database_path,
             client,
@@ -231,6 +254,41 @@ def test_memory_answer_retries_then_rejects_unknown_citation_ids(tmp_path):
             ticker="CXO",
         )
     assert client.answer_calls == 2
+    debug = failure.value.debug
+    assert debug["query_id"]
+    assert debug["model"] == "gemma4"
+    assert debug["available_citation_ids"] == ["c1"]
+    assert debug["retrieved_fact_count"] == 1
+    assert SOURCE in debug["evidence_context"]
+    attempts = debug["answer_attempts"]
+    assert [attempt["validation_error"] for attempt in attempts] == errors
+    assert [attempt["citation_ids"] for attempt in attempts] == answer_ids
+    assert all("A$200 million" in attempt["raw_response"] for attempt in attempts)
+    assert errors[0] in attempts[1]["prompt"]
+
+
+def test_memory_answer_debug_keeps_failed_attempt_after_correction(tmp_path):
+    database_path = tmp_path / "pilot.db"
+    _pilot_database(database_path)
+    client = FakeClient(
+        plan=QueryPlan(
+            intent="state",
+            entity_id="ent-cxo",
+            attribute="cash_balance_as_of",
+        ),
+        answer_ids=[[], ["c1"]],
+    )
+    result = answer_memory(
+        database_path,
+        client,
+        "What was CXO's cash balance?",
+        knowledge_date=date(2026, 10, 15),
+        ticker="CXO",
+    )
+    assert len(result.citations) == 1
+    attempts = result.debug["answer_attempts"]
+    assert attempts[0]["validation_error"] == "a non-abstaining answer has no citations"
+    assert attempts[1]["validation_error"] is None
 
 
 def test_memory_tool_call_records_retrieval_errors_without_question_text(tmp_path):

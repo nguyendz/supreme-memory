@@ -6,7 +6,7 @@ import json
 import re
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Literal
@@ -64,6 +64,14 @@ class MemoryAnswerResponse(BaseModel):
     citation_ids: list[str] = Field(default_factory=list)
 
 
+class MemoryCitationValidationError(ValueError):
+    """Citation rejection with diagnostics for the local query UI."""
+
+    def __init__(self, message: str, *, debug: dict[str, object]) -> None:
+        super().__init__(message)
+        self.debug = debug
+
+
 @dataclass(frozen=True)
 class MemoryQueryResult:
     query_id: str
@@ -80,6 +88,7 @@ class MemoryQueryResult:
     answer_output_tokens: int = 0
     answer_attempts: int = 0
     elapsed_ms: float = 0
+    debug: dict[str, object] = field(default_factory=dict)
 
 
 def _validate_plan(
@@ -460,6 +469,23 @@ def answer_memory(
         **fact_citations,
         **chunk_citations,
     }
+    attempt_debug: list[dict[str, object]] = []
+    debug: dict[str, object] = {
+        "query_id": query_id,
+        "model": selected_model,
+        "question": question,
+        "ticker": normalized_ticker,
+        "knowledge_date": knowledge_date.isoformat(),
+        "query_plan": plan.model_dump(mode="json"),
+        "query_plan_raw_response": query_plan_result.raw_content,
+        "retrieved_fact_count": len(facts),
+        "retrieved_chunk_count": len(chunks),
+        "chunk_fallback_attempted": fallback_attempted,
+        "used_chunk_fallback": fallback_used,
+        "available_citation_ids": list(available_citations),
+        "evidence_context": context,
+        "answer_attempts": attempt_debug,
+    }
     if not available_citations:
         return MemoryQueryResult(
             query_id=query_id,
@@ -476,6 +502,7 @@ def answer_memory(
             used_chunk_fallback=fallback_used,
             query_plan_tokens=query_plan_result.prompt_tokens,
             elapsed_ms=(time.perf_counter() - started) * 1000,
+            debug=debug,
         )
 
     answer_prompt_path = (
@@ -484,6 +511,7 @@ def answer_memory(
         else _PROMPT_ROOT / "memory_answer.md"
     )
     answer_system_prompt = answer_prompt_path.read_text(encoding="utf-8")
+    debug["answer_system_prompt"] = answer_system_prompt
     base_prompt = (
         f"Ticker: {normalized_ticker}\n"
         f"Knowledge date (inclusive): {knowledge_date.isoformat()}\n"
@@ -527,18 +555,29 @@ def answer_memory(
             validation_error = (
                 "unknown citation ID(s): " + ", ".join(sorted(set(unknown_ids)))
             )
-            continue
-        if not response.citation_ids and not _is_abstention(response.answer):
+        elif not response.citation_ids and not _is_abstention(response.answer):
             validation_error = "a non-abstaining answer has no citations"
-            continue
-        validation_error = None
-        break
+        else:
+            validation_error = None
+        attempt_debug.append({
+            "attempt": semantic_attempt,
+            "prompt": prompt,
+            "raw_response": result.raw_content,
+            "answer": response.answer,
+            "citation_ids": response.citation_ids,
+            "validation_error": validation_error,
+            "prompt_tokens": result.prompt_tokens,
+            "output_tokens": result.output_tokens,
+        })
+        if validation_error is None:
+            break
     if response is None:
         raise AssertionError("The memory answer model did not return")
     if validation_error is not None:
-        raise ValueError(
+        raise MemoryCitationValidationError(
             f"Memory answer failed citation validation after one correction: "
-            f"{validation_error}"
+            f"{validation_error}",
+            debug=debug,
         )
     citations = tuple(
         available_citations[citation_id]
@@ -559,4 +598,5 @@ def answer_memory(
         answer_output_tokens=answer_output_tokens,
         answer_attempts=answer_attempts,
         elapsed_ms=(time.perf_counter() - started) * 1000,
+        debug=debug,
     )
