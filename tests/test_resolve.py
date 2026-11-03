@@ -1,8 +1,11 @@
 from types import SimpleNamespace
 
+import agent_memory.pipeline.resolve as resolve_module
 from agent_memory.db import database_connection, initialize_database
 from agent_memory.pipeline.extract import CandidateEntity
 from agent_memory.pipeline.resolve import (
+    EntityCandidate,
+    EntityChoice,
     normalize_attribute_name,
     resolve_attribute,
     resolve_entity,
@@ -94,6 +97,71 @@ def test_entity_alias_is_visible_only_after_its_first_seen_time(tmp_path):
     assert later.entity is not None
     assert later.entity.id == "entity-old"
     assert client.embed_calls == 1
+
+
+def test_invalid_entity_candidate_index_is_preserved_as_unresolved(tmp_path, monkeypatch):
+    database_path = tmp_path / "memory.db"
+    initialize_database(database_path)
+    with database_connection(database_path) as connection:
+        _insert_document(connection, "doc-1", "2025-01-15T00:00:00+00:00")
+        connection.execute(
+            """
+            INSERT INTO entity (id, ticker, type, canonical_name, first_seen_at)
+            VALUES (
+                'entity-existing', 'CXO', 'company', 'Core Mining',
+                '2024-01-01T00:00:00+00:00'
+            )
+            """
+        )
+
+    candidates = [
+        EntityCandidate(
+            id="entity-existing",
+            ticker="CXO",
+            type="company",
+            canonical_name="Core Mining",
+            first_seen_at="2024-01-01T00:00:00+00:00",
+        )
+    ]
+
+    def candidate_search(database_path, client, **kwargs):
+        del database_path, client, kwargs
+        return candidates
+
+    class InvalidIndexClient(FakeClient):
+        def chat_json(self, prompt, response_model, **kwargs):
+            del prompt, kwargs
+            assert response_model is EntityChoice
+            value = EntityChoice(
+                choice="existing",
+                candidate_index=7,
+                reason="Selected an unsupported index.",
+            )
+            return SimpleNamespace(
+                value=value,
+                raw_content=value.model_dump_json(),
+                prompt_tokens=1,
+                output_tokens=1,
+                attempts=1,
+                wall_duration_ms=1,
+            )
+
+    monkeypatch.setattr(resolve_module, "_entity_candidates", candidate_search)
+    result = resolve_entity(
+        database_path,
+        InvalidIndexClient(),
+        ticker="CXO",
+        source_entity=CandidateEntity(name="Core Lithium", type="company"),
+        evidence="Core Lithium announced a project.",
+        published_at="2025-01-15T00:00:00+00:00",
+        document_id="doc-1",
+        model="gemma4",
+        same_document={},
+    )
+
+    assert result.entity is None
+    assert result.candidates == tuple(candidates)
+    assert result.reason == "Entity resolver selected an unavailable candidate index."
 
 
 def test_attribute_resolution_normalizes_and_follows_explicit_merge(tmp_path):

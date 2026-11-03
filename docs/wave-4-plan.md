@@ -56,12 +56,20 @@ Gate 2.
   migration 6. It answered A$200 million and displayed the quarterly's source
   quote and path. The `get_state` tool call was recorded with one result and
   selector metadata; the raw question is not stored in that log.
+- At the user's explicit acceptance of current quality for query testing,
+  `var/wave3/dev.db` was promoted from the current Gemma caches in a separate
+  copy. It contains 841 facts sourced from 100 documents, with 251 pending
+  reconciliation reviews; the source DB remains untouched. The UI now queries
+  this multi-document copy. A Finniss shipment-timing query returned four
+  citations from multiple documents; this exploratory result is not a Gate 4
+  pass.
 - `am ask` currently defaults to memory mode; `--baseline` explicitly selects
   baseline RAG, and `--as-of` is required. This working pilot path is not a
   claim of full-corpus query quality or Gate 4 completion.
-- Wave 2 Gate 2 remains open: full-slice quote/schema metrics are below target.
-  Gemma and Qwen are explicitly allowed generation models; `nimble` is
-  decision-only and is not eligible. Pilot work must use the disposable DB.
+- Wave 2 Gate 2's numeric thresholds remain unmet. The user accepted the
+  measured metrics for the isolated query experiment, not as a Gate 2 pass or
+  production sign-off. Gemma and Qwen are explicitly allowed generation
+  models; `nimble` is decision-only and is not eligible.
 - `eval/questions.yaml` currently contains 25 gold questions. The 10-question
   Gate 4 run and expansion to 40 questions remain pending.
 - Wave 4 should not ask the user to inspect T1 CSVs or internal action rows.

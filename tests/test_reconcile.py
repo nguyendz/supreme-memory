@@ -29,8 +29,9 @@ from agent_memory.query.pit import current_facts_at
 class FakeClient:
     model_name = "gemma4"
 
-    def __init__(self, *, narrative_choice="same"):
+    def __init__(self, *, narrative_choice="same", narrative_index=0):
         self.narrative_choice = narrative_choice
+        self.narrative_index = narrative_index
         self.chat_calls = 0
         self.embed_calls = 0
 
@@ -53,7 +54,9 @@ class FakeClient:
             raise AssertionError(f"Unexpected decision model: {response_model}")
         value = NarrativeChoice(
             choice=self.narrative_choice,
-            candidate_index=0 if self.narrative_choice == "same" else None,
+            candidate_index=(
+                self.narrative_index if self.narrative_choice == "same" else None
+            ),
             reason="Synthetic test decision.",
         )
         return SimpleNamespace(
@@ -362,7 +365,19 @@ def test_narrative_judgment_is_cached_and_reused_on_replay(tmp_path):
     assert decision_cache_count == 1
 
 
-def test_unresolved_narrative_candidate_is_preserved_for_review(tmp_path):
+@pytest.mark.parametrize(
+    ("narrative_choice", "narrative_index", "expected_reason"),
+    [
+        ("unresolved", 0, "Synthetic test decision"),
+        ("same", 99, "unavailable candidate index"),
+    ],
+)
+def test_uncertain_narrative_candidate_is_preserved_for_review(
+    tmp_path,
+    narrative_choice,
+    narrative_index,
+    expected_reason,
+):
     database_path = tmp_path / "wave3.db"
     initialize_database(database_path)
     with database_connection(database_path) as connection:
@@ -419,7 +434,10 @@ def test_unresolved_narrative_candidate_is_preserved_for_review(tmp_path):
 
     summary = run_reconciliation(
         database_path,
-        FakeClient(narrative_choice="unresolved"),
+        FakeClient(
+            narrative_choice=narrative_choice,
+            narrative_index=narrative_index,
+        ),
         model="gemma4",
         ticker="CXO",
         confirm_wave2_gate=True,
@@ -438,7 +456,7 @@ def test_unresolved_narrative_candidate_is_preserved_for_review(tmp_path):
     assert summary.unresolved == 1
     assert len(facts) == 1
     assert len(reviews) == 1
-    assert "Synthetic test decision" in reviews[0]["reason"]
+    assert expected_reason in reviews[0]["reason"]
 
 
 def test_same_time_key_conflicts_are_reviewed_not_arbitrarily_ordered(tmp_path):

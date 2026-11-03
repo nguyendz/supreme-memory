@@ -40,6 +40,13 @@ candidates, 1,136 quotes passed and 243 failed; four T0 and four recovery-capped
 facts were reported. Gate 2 remains open, so no canonical facts were promoted
 from the real dev database.
 
+On 2026-11-03, the user accepted the measured quality for isolated query
+testing. A separate copy at `var/wave3/dev.db` was reconciled from the 108
+current Gemma caches: 841 `ADD`, 11 `CONFIRM`, 0 `SUPERSEDE`, 251 pending
+review cases, 243 quote rejects, and 16 unsupported forms. One hundred source
+documents have canonical facts. This does not meet the numeric Gate 2 targets;
+the Wave 1 source DB remains unchanged and empty of canonical rows.
+
 The full test suite passes (**113 passed**). Pylance reports no diagnostics in
 the new resolver, reconciliation, PIT, or CLI code; the only diagnostic was a
 pre-existing `contextmanager` annotation warning in `db.py`.
@@ -75,7 +82,7 @@ keeps pilot safety work from duplicating the query implementation plan.
 - Wave 2 stores candidate facts and raw model output in
   `extraction_cache`; it does not populate `entity`, `attribute`, `fact`, or
   `fact_source`.
-- Wave 2 Gate 2 is **still open**. Qwen's full-slice non-T0 quote pass is 88.9%
+- Wave 2 Gate 2's numeric targets remain unmet. Qwen's full-slice non-T0 quote pass is 88.9%
   and Gemma's is 82.4%, both below the 90% target. Logged Qwen calls were
   schema-valid on the first attempt or one retry in 88.5% of grouped calls,
   below the 98% target. These remain broad-quality concerns, not a reason to
@@ -90,10 +97,10 @@ keeps pilot safety work from duplicating the query implementation plan.
 - The database already defines `entity`, `entity_alias`, `attribute`, `fact`,
   `fact_source`, and `fact_vec`. Review their constraints and migration history
   before adding schema. Do not duplicate existing tables.
-- Pre-gate implementation can cover schema checks, synthetic fixtures,
-  resolver tests, and PIT helpers. A one-document exploratory pilot may write
-  to its disposable database before Gate 2 closes; do not bulk-promote
-  unreviewed candidates or change the default database/model.
+- Before Gate 2 closes, implementation and promotion must remain isolated.
+  The user's explicit 2026-11-03 quality waiver permits the disposable
+  `var/wave3/dev.db` query experiment only; it does not approve the default
+  database/model or production use.
 - The family-specific, slot-guided extraction idea in the
   [design brainstorm](./memory-design-brainstorm.md) remains a proposal. Keep
   it separate from Wave 3 so reconciliation uses a frozen extraction cache.

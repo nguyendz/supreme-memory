@@ -390,16 +390,22 @@ def resolve_entity(
         decision = cached_decision.value
         cache_hit = cached_decision.cache_hit
         if decision.choice != "existing" and decision.candidate_index is not None:
-            raise ValueError(
-                "Entity resolver returned a candidate index for a non-existing choice"
+            return EntityResolution(
+                None,
+                tuple(candidates),
+                "Entity resolver returned a candidate index for a non-existing choice.",
+                cache_hit=cache_hit,
             )
         if decision.choice == "existing":
             if (
                 decision.candidate_index is None
                 or decision.candidate_index >= len(candidates)
             ):
-                raise ValueError(
-                    "Entity resolver selected an unavailable candidate index"
+                return EntityResolution(
+                    None,
+                    tuple(candidates),
+                    "Entity resolver selected an unavailable candidate index.",
+                    cache_hit=cache_hit,
                 )
             selected = candidates[decision.candidate_index]
             resolved = ResolvedEntity(

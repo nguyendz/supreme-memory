@@ -1148,18 +1148,37 @@ def _plan_document(
                 )
                 plan.decision_cache_hits += int(choice.cache_hit)
                 decision = choice.value
+                invalid_decision_reason: str | None = None
                 if decision.choice != "same" and decision.candidate_index is not None:
-                    raise ValueError(
-                        "Narrative judge returned an index for a non-same choice"
+                    invalid_decision_reason = (
+                        "Narrative judge returned an index for a non-same choice."
                     )
-                if decision.choice == "same":
-                    if (
-                        decision.candidate_index is None
-                        or decision.candidate_index >= len(narrative_candidates)
-                    ):
-                        raise ValueError(
-                            "Narrative judge selected an unavailable candidate index"
+                elif decision.choice == "same" and (
+                    decision.candidate_index is None
+                    or decision.candidate_index >= len(narrative_candidates)
+                ):
+                    invalid_decision_reason = (
+                        "Narrative judge selected an unavailable candidate index."
+                    )
+                if invalid_decision_reason is not None:
+                    plan.reviews.append(
+                        _review_case(
+                            document_id,
+                            candidate,
+                            invalid_decision_reason,
+                            [
+                                {
+                                    "fact_id": item.fact_id,
+                                    "entity_id": item.entity_id,
+                                    "text": item.text,
+                                    "distance": item.distance,
+                                }
+                                for item in narrative_candidates
+                            ],
                         )
+                    )
+                    continue
+                if decision.choice == "same":
                     fact_id = narrative_candidates[
                         decision.candidate_index
                     ].fact_id
