@@ -125,7 +125,12 @@ def _insert_pilot_source(database_path: Path):
     with database_connection(database_path) as connection:
         connection.execute("DROP TABLE reconciliation_review")
         connection.execute("DROP TABLE reconciliation_cache")
-        connection.execute("DELETE FROM schema_migrations WHERE version = 4")
+        connection.execute("DROP TABLE memory_tool_call")
+        connection.execute("DROP TRIGGER fact_fts_insert")
+        connection.execute("DROP TRIGGER fact_fts_delete")
+        connection.execute("DROP TRIGGER fact_fts_update")
+        connection.execute("DROP TABLE fact_fts")
+        connection.execute("DELETE FROM schema_migrations WHERE version >= 4")
 
 
 def _canonical_counts(database_path: Path) -> dict[str, int]:

@@ -29,11 +29,19 @@ from agent_memory.pipeline.reconcile import (
     run_reconciliation,
     run_pilot_reconciliation,
 )
+from agent_memory.query.agent import answer_memory
 from agent_memory.query.baseline_rag import answer_baseline, build_baseline_index
+from agent_memory.query.pit import (
+    current_facts_at,
+    fact_sources_at,
+    timeline_at,
+)
 from agent_memory.review_ui import generate_model_review_ui
 
 
 app = typer.Typer(no_args_is_help=True, help="Local company-announcement memory.")
+show_app = typer.Typer(no_args_is_help=True, help="Inspect memory records and sources.")
+app.add_typer(show_app, name="show")
 console = Console()
 
 
@@ -589,37 +597,305 @@ def ask(
     baseline: bool = typer.Option(
         False, "--baseline", help="Use the naive chunk-RAG baseline."
     ),
+    memory: bool = typer.Option(
+        False, "--memory", help="Use point-in-time canonical memory."
+    ),
     as_of: str | None = typer.Option(
         None, "--as-of", help="Inclusive knowledge date (YYYY-MM-DD)."
     ),
     ticker: str | None = typer.Option(None, help="Restrict retrieval to this ticker."),
+    database: Path | None = typer.Option(
+        None,
+        "--database",
+        exists=True,
+        dir_okay=False,
+        help="Override the database for the selected query mode.",
+    ),
+    model: str | None = typer.Option(
+        None, "--model", help="Approved local generation model."
+    ),
+    chunk_fallback: bool = typer.Option(
+        False,
+        "--chunk-fallback",
+        help="Allow non-boilerplate chunk fallback when memory has no suitable fact.",
+    ),
     config: Path | None = typer.Option(None, "--config", help="Path to config.toml."),
 ) -> None:
-    """Answer from a baseline corpus with validated source citations."""
-    if not baseline:
-        raise typer.BadParameter("Currently supported mode requires --baseline")
+    """Answer from point-in-time memory or explicitly selected baseline RAG."""
+    if baseline and memory:
+        raise typer.BadParameter("Choose either --baseline or --memory, not both")
+    if baseline and chunk_fallback:
+        raise typer.BadParameter("--chunk-fallback is only available in memory mode")
     knowledge_date = _parse_cli_date(as_of, "--as-of")
     if knowledge_date is None:
-        raise typer.BadParameter("--as-of is required with --baseline")
+        raise typer.BadParameter("--as-of is required")
     settings = _load_settings(config)
-    baseline_path = settings.project_root / "var" / "eval" / "baseline.db"
-    if not baseline_path.is_file():
+    selected_model = model or settings.ollama_model
+    if selected_model not in APPROVED_EXTRACTION_MODELS:
         raise typer.BadParameter(
-            f"Baseline database not found; run am baseline-index first: {baseline_path}"
+            "Query answering requires an approved local generation model "
+            "(qwen3.5:9b or gemma4)"
         )
-    _validate_wave2_runtime(settings)
-    selected_ticker = _baseline_ticker(baseline_path, ticker)
-    client = LLMClient(settings, baseline_path)
-    answer = answer_baseline(
-        baseline_path,
-        client,
-        question,
-        knowledge_date=knowledge_date,
-        ticker=selected_ticker,
-    )
+    _validate_wave2_runtime(settings, require_chat_model=False)
+
+    if baseline:
+        baseline_path = database or (
+            settings.project_root / "var" / "eval" / "baseline.db"
+        )
+        if not baseline_path.is_file():
+            raise typer.BadParameter(
+                f"Baseline database not found; run am baseline-index first: "
+                f"{baseline_path}"
+            )
+        selected_ticker = _baseline_ticker(baseline_path, ticker)
+        client = LLMClient(settings, baseline_path)
+        answer = answer_baseline(
+            baseline_path,
+            client,
+            question,
+            knowledge_date=knowledge_date,
+            ticker=selected_ticker,
+            model=selected_model,
+        )
+        console.print(answer.answer)
+        for citation in answer.citations:
+            console.print(
+                f"[dim]{citation.document_id}: {citation.quote}[/dim]"
+            )
+        return
+
+    memory_path = database or settings.database_path
+    if not memory_path.is_file():
+        raise typer.BadParameter(
+            f"Memory database not found: {memory_path}. "
+            "Reconcile a disposable pilot DB first."
+        )
+    selected_ticker = _baseline_ticker(memory_path, ticker)
+    client = LLMClient(settings, memory_path)
+    try:
+        answer = answer_memory(
+            memory_path,
+            client,
+            question,
+            knowledge_date=knowledge_date,
+            ticker=selected_ticker,
+            model=selected_model,
+            chunk_fallback=chunk_fallback,
+        )
+    except (ValueError, OSError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
     console.print(answer.answer)
     for citation in answer.citations:
-        console.print(f"[dim]{citation.document_id}: {citation.quote}[/dim]")
+        console.print(
+            f"[dim]{citation.citation_id} · {citation.document_id} · "
+            f"{citation.headline} ({citation.published_at[:10]})[/dim]"
+        )
+        console.print(f"[dim]{citation.quote}[/dim]")
+        if citation.source_path:
+            console.print(f"[dim]Source: {citation.source_path}[/dim]")
+
+
+def _show_database_path(database: Path | None, config: Path | None) -> Path:
+    settings = _load_settings(config)
+    database_path = database or settings.database_path
+    if not database_path.is_file():
+        raise typer.BadParameter(f"Database not found: {database_path}")
+    return database_path
+
+
+def _print_fact_with_sources(
+    database: Path,
+    fact: sqlite3.Row,
+    knowledge_date: date,
+) -> None:
+    console.print(
+        f"{fact['id']} | {fact['tier']} | {fact['text']}",
+        markup=False,
+    )
+    with database_connection(database) as connection:
+        sources = fact_sources_at(connection, str(fact["id"]), knowledge_date)
+        for source in sources:
+            document = connection.execute(
+                "SELECT headline FROM document WHERE id = ?",
+                (source["doc_id"],),
+            ).fetchone()
+            headline = document["headline"] if document is not None else "Unknown"
+            console.print(
+                f"  {source['action']} {source['doc_id']} "
+                f"({source['published_at'][:10]}) — {headline}",
+                markup=False,
+            )
+            console.print(f"  Quote: {source['quote']}", markup=False)
+
+
+@show_app.command("doc")
+def show_document(
+    document_id: str,
+    database: Path | None = typer.Option(
+        None, "--database", exists=True, dir_okay=False
+    ),
+    open_source: bool = typer.Option(
+        False, "--open", help="Open the source markdown in the default application."
+    ),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml."),
+) -> None:
+    """Display a source document's metadata and optionally open its markdown."""
+    database_path = _show_database_path(database, config)
+    settings = _load_settings(config)
+    with database_connection(database_path) as connection:
+        document = connection.execute(
+            """
+            SELECT id, ticker, headline, published_at, text_path, triage_class
+            FROM document WHERE id = ?
+            """,
+            (document_id,),
+        ).fetchone()
+    if document is None:
+        raise typer.BadParameter(f"Document not found: {document_id}")
+    source_path = (
+        Path(document["text_path"]).expanduser()
+        if document["text_path"]
+        else None
+    )
+    if source_path is not None and not source_path.is_absolute():
+        source_path = settings.project_root / source_path
+    console.print(
+        f"{document['headline']} ({document['ticker']}, "
+        f"{document['published_at'][:10]}, {document['triage_class']})",
+        markup=False,
+    )
+    console.print(f"Document ID: {document['id']}", markup=False)
+    if source_path is None:
+        console.print("[yellow]No source text path is recorded.[/yellow]")
+        return
+    console.print(f"Source: {source_path}", markup=False)
+    if open_source:
+        if not source_path.is_file():
+            raise typer.BadParameter(f"Source markdown not found: {source_path}")
+        if not webbrowser.open(source_path.resolve().as_uri()):
+            console.print("[yellow]Could not open the source automatically.[/yellow]")
+
+
+@show_app.command("fact")
+def show_fact(
+    fact_id: str,
+    as_of: str = typer.Option(..., "--as-of", help="Inclusive knowledge date."),
+    database: Path | None = typer.Option(
+        None, "--database", exists=True, dir_okay=False
+    ),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml."),
+) -> None:
+    """Display a fact and its point-in-time-visible source links."""
+    knowledge_date = _parse_cli_date(as_of, "--as-of")
+    if knowledge_date is None:
+        raise typer.BadParameter("--as-of is required")
+    database_path = _show_database_path(database, config)
+    with database_connection(database_path) as connection:
+        fact = connection.execute(
+            "SELECT * FROM fact WHERE id = ?", (fact_id,)
+        ).fetchone()
+        visible_source = connection.execute(
+            """
+            SELECT 1 FROM fact_source
+            WHERE fact_id = ? AND date(published_at) <= date(?)
+            LIMIT 1
+            """,
+            (fact_id, knowledge_date.isoformat()),
+        ).fetchone()
+    if fact is None or visible_source is None:
+        raise typer.BadParameter(
+            f"Fact is not visible at {knowledge_date.isoformat()}: {fact_id}"
+        )
+    _print_fact_with_sources(database_path, fact, knowledge_date)
+
+
+@show_app.command("entity")
+def show_entity(
+    entity_id: str,
+    as_of: str = typer.Option(..., "--as-of", help="Inclusive knowledge date."),
+    database: Path | None = typer.Option(
+        None, "--database", exists=True, dir_okay=False
+    ),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml."),
+) -> None:
+    """Display an entity and its current facts at a knowledge date."""
+    knowledge_date = _parse_cli_date(as_of, "--as-of")
+    if knowledge_date is None:
+        raise typer.BadParameter("--as-of is required")
+    database_path = _show_database_path(database, config)
+    with database_connection(database_path) as connection:
+        entity = connection.execute(
+            "SELECT * FROM entity WHERE id = ?", (entity_id,)
+        ).fetchone()
+        if entity is None:
+            raise typer.BadParameter(f"Entity not found: {entity_id}")
+        facts = current_facts_at(
+            connection,
+            knowledge_date,
+            ticker=str(entity["ticker"]),
+            entity_id=entity_id,
+        )
+        aliases = connection.execute(
+            """
+            SELECT alias, first_seen_at, source_doc FROM entity_alias
+            WHERE entity_id = ? AND date(first_seen_at) <= date(?)
+            ORDER BY first_seen_at, alias
+            """,
+            (entity_id, knowledge_date.isoformat()),
+        ).fetchall()
+    if not facts:
+        raise typer.BadParameter(
+            f"Entity has no visible facts at {knowledge_date.isoformat()}: {entity_id}"
+        )
+    console.print(
+        f"{entity['canonical_name']} ({entity['type']}, {entity['ticker']})",
+        markup=False,
+    )
+    for alias in aliases:
+        console.print(
+            f"  Alias: {alias['alias']} (since {alias['first_seen_at'][:10]})",
+            markup=False,
+        )
+    for fact in facts:
+        _print_fact_with_sources(database_path, fact, knowledge_date)
+
+
+@show_app.command("timeline")
+def show_timeline(
+    entity_id: str,
+    attribute: str,
+    as_of: str = typer.Option(..., "--as-of", help="Inclusive knowledge date."),
+    database: Path | None = typer.Option(
+        None, "--database", exists=True, dir_okay=False
+    ),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml."),
+) -> None:
+    """Display visible fact history for one entity attribute."""
+    knowledge_date = _parse_cli_date(as_of, "--as-of")
+    if knowledge_date is None:
+        raise typer.BadParameter("--as-of is required")
+    database_path = _show_database_path(database, config)
+    with database_connection(database_path) as connection:
+        entity = connection.execute(
+            "SELECT ticker, canonical_name FROM entity WHERE id = ?",
+            (entity_id,),
+        ).fetchone()
+        if entity is None:
+            raise typer.BadParameter(f"Entity not found: {entity_id}")
+        facts = timeline_at(
+            connection,
+            ticker=str(entity["ticker"]),
+            entity_id=entity_id,
+            attribute=attribute,
+            knowledge_time=knowledge_date,
+        )
+    console.print(
+        f"Timeline: {entity['canonical_name']} / {attribute} "
+        f"as of {knowledge_date.isoformat()}",
+        markup=False,
+    )
+    for fact in facts:
+        _print_fact_with_sources(database_path, fact, knowledge_date)
 
 
 @app.command("eval")

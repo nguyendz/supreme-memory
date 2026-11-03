@@ -65,14 +65,19 @@ def test_database_migrations_are_idempotent_and_fts_tracks_chunks(tmp_path):
         versions = connection.execute(
             "SELECT version FROM schema_migrations"
         ).fetchall()
-        assert [row["version"] for row in versions] == [1, 2, 3, 4]
+        assert [row["version"] for row in versions] == [1, 2, 3, 4, 5, 6]
         tables = {
             row["name"]
             for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
-        assert {"reconciliation_cache", "reconciliation_review"} <= tables
+        assert {
+            "reconciliation_cache",
+            "reconciliation_review",
+            "fact_fts",
+            "memory_tool_call",
+        } <= tables
 
 
 def test_vector_tables_use_actual_embedding_width(tmp_path):
@@ -118,6 +123,60 @@ def test_initialize_database_restores_missing_entity_vector_table(tmp_path):
             "SELECT 1 FROM sqlite_master WHERE name = 'entity_vec'"
         ).fetchone()
     assert table is not None
+
+
+def test_fact_fts_tracks_fact_insert_update_and_delete(tmp_path):
+    database_path = tmp_path / "memory.db"
+    initialize_database(database_path)
+    with database_connection(database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO entity (id, ticker, type, canonical_name, first_seen_at)
+            VALUES ('ent-1', 'CXO', 'project', 'BP33',
+                    '2025-01-01T00:00:00+00:00')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO attribute (name, description, first_seen_at)
+            VALUES ('production_volume', 'Production volume',
+                    '2025-01-01T00:00:00+00:00')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO fact (
+                id, ticker, entity_id, attribute, value, fact_type, tier,
+                text, first_seen_at, extractor_version
+            ) VALUES (
+                'fact-1', 'CXO', 'ent-1', 'production_volume', '10,000 tonnes',
+                'metric', 'T1', 'BP33 production reached 10,000 tonnes.',
+                '2025-01-01T00:00:00+00:00', 'test-v1'
+            )
+            """
+        )
+        inserted = connection.execute(
+            "SELECT fact_id FROM fact_fts WHERE fact_fts MATCH 'BP33'"
+        ).fetchall()
+        connection.execute(
+            "UPDATE fact SET text = 'Finniss production reached 20,000 tonnes.' "
+            "WHERE id = 'fact-1'"
+        )
+        old_after_update = connection.execute(
+            "SELECT fact_id FROM fact_fts WHERE fact_fts MATCH 'BP33'"
+        ).fetchall()
+        new_after_update = connection.execute(
+            "SELECT fact_id FROM fact_fts WHERE fact_fts MATCH 'Finniss'"
+        ).fetchall()
+        connection.execute("DELETE FROM fact WHERE id = 'fact-1'")
+        after_delete = connection.execute(
+            "SELECT fact_id FROM fact_fts WHERE fact_fts MATCH 'Finniss'"
+        ).fetchall()
+
+    assert [row["fact_id"] for row in inserted] == ["fact-1"]
+    assert old_after_update == []
+    assert [row["fact_id"] for row in new_after_update] == ["fact-1"]
+    assert after_delete == []
 
 
 def test_hash_observations_rebuild_aggregate_and_cascade_with_document(tmp_path):
@@ -203,7 +262,7 @@ def test_schema_v2_database_migrates_to_v3(tmp_path):
             row["name"]
             for row in connection.execute("PRAGMA table_info(document)").fetchall()
         }
-    assert [row["version"] for row in versions] == [1, 2, 3, 4]
+    assert [row["version"] for row in versions] == [1, 2, 3, 4, 5, 6]
     assert observation_table is not None
     assert "form_type" in document_columns
 
@@ -215,6 +274,11 @@ def test_schema_v1_database_runs_both_wave1_migrations(tmp_path):
         connection.execute("DROP TABLE paragraph_hash_observation")
         connection.execute("DROP TABLE reconciliation_review")
         connection.execute("DROP TABLE reconciliation_cache")
+        connection.execute("DROP TABLE memory_tool_call")
+        connection.execute("DROP TRIGGER fact_fts_insert")
+        connection.execute("DROP TRIGGER fact_fts_delete")
+        connection.execute("DROP TRIGGER fact_fts_update")
+        connection.execute("DROP TABLE fact_fts")
         connection.execute("ALTER TABLE document DROP COLUMN form_type")
         connection.execute("DELETE FROM schema_migrations WHERE version >= 2")
 
@@ -233,6 +297,6 @@ def test_schema_v1_database_runs_both_wave1_migrations(tmp_path):
             WHERE type = 'table' AND name = 'paragraph_hash_observation'
             """
         ).fetchone()
-    assert [row["version"] for row in versions] == [1, 2, 3, 4]
+    assert [row["version"] for row in versions] == [1, 2, 3, 4, 5, 6]
     assert observation_table is not None
     assert "form_type" in document_columns

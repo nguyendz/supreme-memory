@@ -521,7 +521,7 @@ def test_preflight_is_read_only_and_reports_current_quotes(tmp_path):
     assert before.quote_rejected == 0
     assert not before.missing
     assert fact_count == 0
-    assert migration_version == 4
+    assert migration_version == 6
 
 
 def test_preflight_excludes_explicitly_unsupported_forms(tmp_path):

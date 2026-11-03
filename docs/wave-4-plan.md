@@ -34,7 +34,8 @@ Gate 2.
 ## Current status and entry conditions
 
 - Wave 3 code and synthetic tests are implemented. The full dev-slice source
-  DB `var/wave1/dev.db` still has no canonical rows and must remain unchanged.
+  DB `var/wave1/dev.db` remains schema v3 with zero entity, attribute, fact,
+  and fact-source rows; it must remain unchanged.
 - The isolated `var/wave3/pilot.db` has been created from the September 2026
   quarterly only. It contains 13 `ADD` facts, zero quote rejects, and zero
   unresolved decisions. The cash-balance fact is PIT-visible on
@@ -42,11 +43,22 @@ Gate 2.
 - The pilot fact's stored attribute is `cash_balance_as_of`, illustrating that
   query routing must use the actual active attribute choices rather than
   assuming every model emits the exact string `cash_balance`.
+- Wave 4 query code is implemented for state, timeline, event/search, and
+  summary intents, with point-in-time fact retrieval, lexical/vector search,
+  optional chunk fallback, citation validation, and source inspection commands.
+  Synthetic tests cover these routes and `am show fact/entity/timeline`.
+- The real `w0-01` query was rerun on the isolated pilot DB after schema
+  migration 6. It answered A$200 million and displayed the quarterly's source
+  quote and path. The `get_state` tool call was recorded with one result and
+  selector metadata; the raw question is not stored in that log.
+- `am ask` currently defaults to memory mode; `--baseline` explicitly selects
+  baseline RAG, and `--as-of` is required. This working pilot path is not a
+  claim of full-corpus query quality or Gate 4 completion.
 - Wave 2 Gate 2 remains open: full-slice quote/schema metrics are below target.
   Gemma and Qwen are explicitly allowed generation models; `nimble` is
   decision-only and is not eligible. Pilot work must use the disposable DB.
-- The current `am ask` command supports baseline RAG only. `am ask --memory`
-  and the memory query/answer modules are not implemented yet.
+- `eval/questions.yaml` currently contains 25 gold questions. The 10-question
+  Gate 4 run and expansion to 40 questions remain pending.
 - Wave 4 should not ask the user to inspect T1 CSVs or internal action rows.
   User feedback is collected from the displayed answer and source evidence.
 
@@ -173,8 +185,8 @@ The pilot does not close Gate 2 or Gate 4.
 
 **Implementation**
 
-- Make memory mode the default `am ask` behavior after its Gate 4 path is ready;
-  keep `--baseline` as an explicit comparison mode.
+- `am ask` currently defaults to memory mode; keep `--baseline` as an explicit
+  comparison mode. The default does not imply that Gate 4 has passed.
 - Require `--as-of` for memory mode and require or unambiguously infer ticker.
 - Add `am show doc`, `fact`, `entity`, and `timeline` outputs sufficient to
   inspect a citation and its history.
@@ -204,16 +216,19 @@ The pilot does not close Gate 2 or Gate 4.
   formal full Gate 4 run.
 - A single pilot question does not count as the 10-question Gate 4 minimum.
 
-## Test sequence
+## Test sequence and remaining gates
 
-1. Unit-test the typed planner, retrieval filters, answer schema, and citation
-   materialization with synthetic databases.
-2. Run the `w0-01` pilot on `var/wave3/pilot.db`; validate its evidence and
-   answer automatically.
-3. Present only the answer and source evidence to the user for the pilot
-   “taste test.”
-4. Expand retrieval to the remaining intents and run 10 gold questions.
-5. Complete summary, inspection commands, and 40-question gold-set work.
+1. **Done:** unit-test the typed planner, retrieval filters, answer schema,
+   citation materialization, vector retrieval, telemetry, and inspection
+   commands with synthetic databases.
+2. **Done:** rerun `w0-01` on `var/wave3/pilot.db`; verify its A$200 million
+   answer, source quote, and recorded memory tool call.
+3. **Pending user review:** judge the displayed answer and source evidence; no
+   raw extraction rows are needed.
+4. **Pending:** run at least 10 gold questions end to end, including PIT and
+   future-source checks.
+5. **Pending:** grow the 25-question gold set to at least 40 and assess
+   summary quality across an approved corpus.
 6. Run Gate 4 only on an approved corpus with no leaked citations.
 
 ## Gates and deferred work

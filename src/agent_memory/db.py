@@ -12,7 +12,7 @@ from typing import Iterator
 import sqlite_vec
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 
 _SCHEMA_SQL = """
 CREATE TABLE document (
@@ -237,6 +237,68 @@ CREATE INDEX reconciliation_review_status_idx
     ON reconciliation_review (status, doc_id);
 """
 
+_MIGRATION_5_SQL = """
+CREATE VIRTUAL TABLE fact_fts USING fts5(
+    fact_id UNINDEXED,
+    ticker UNINDEXED,
+    entity_id UNINDEXED,
+    attribute,
+    value,
+    text,
+    tokenize='unicode61 remove_diacritics 2'
+);
+
+INSERT INTO fact_fts (fact_id, ticker, entity_id, attribute, value, text)
+SELECT id, ticker, COALESCE(entity_id, ''), COALESCE(attribute, ''),
+       COALESCE(value, ''), text
+FROM fact;
+
+CREATE TRIGGER fact_fts_insert AFTER INSERT ON fact BEGIN
+    INSERT INTO fact_fts (fact_id, ticker, entity_id, attribute, value, text)
+    VALUES (
+        new.id, new.ticker, COALESCE(new.entity_id, ''),
+        COALESCE(new.attribute, ''), COALESCE(new.value, ''), new.text
+    );
+END;
+
+CREATE TRIGGER fact_fts_delete AFTER DELETE ON fact BEGIN
+    DELETE FROM fact_fts WHERE fact_id = old.id;
+END;
+
+CREATE TRIGGER fact_fts_update AFTER UPDATE ON fact BEGIN
+    DELETE FROM fact_fts WHERE fact_id = old.id;
+    INSERT INTO fact_fts (fact_id, ticker, entity_id, attribute, value, text)
+    VALUES (
+        new.id, new.ticker, COALESCE(new.entity_id, ''),
+        COALESCE(new.attribute, ''), COALESCE(new.value, ''), new.text
+    );
+END;
+"""
+
+_MIGRATION_6_SQL = """
+CREATE TABLE memory_tool_call (
+    id INTEGER PRIMARY KEY,
+    query_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL CHECK (
+        tool_name IN (
+            'get_state', 'get_timeline', 'search_facts',
+            'get_summary', 'search_chunks'
+        )
+    ),
+    ticker TEXT NOT NULL,
+    knowledge_date TEXT NOT NULL,
+    args_json TEXT NOT NULL,
+    result_count INTEGER NOT NULL CHECK (result_count >= 0),
+    elapsed_ms REAL NOT NULL CHECK (elapsed_ms >= 0),
+    status TEXT NOT NULL CHECK (status IN ('ok', 'error')),
+    error TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX memory_tool_call_query_idx
+    ON memory_tool_call (query_id, id);
+"""
+
 
 def connect_database(path: Path) -> sqlite3.Connection:
     """Open a configured SQLite connection."""
@@ -292,6 +354,8 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         (2, _MIGRATION_2_SQL),
         (3, _MIGRATION_3_SQL),
         (4, _MIGRATION_4_SQL),
+        (5, _MIGRATION_5_SQL),
+        (6, _MIGRATION_6_SQL),
     )
     for version, migration_sql in migrations:
         if version in applied_versions:
